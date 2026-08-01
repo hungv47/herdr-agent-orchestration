@@ -1,0 +1,17 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local editor and agent state
+.idea/
+.vscode/
+.claude/
+.codex/
+.pi/
+
+# Local runtime and test output
+*.log
+*.tmp
+*.swp
+.venv/
+__pycache__/
