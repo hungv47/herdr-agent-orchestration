@@ -49,6 +49,17 @@ Never use a fourth model or harness.
 
 Edit this example whenever the approved routing preference changes.
 
+## Herdr sessions and routing
+
+Route each task to the session that owns its surface: a personal task to the
+personal session, a business or product-code task to the business/product
+session, and a current-employment task — rooted in the private employer
+workspace — to the current-employment session. Keep **only three sessions**;
+never create an additional one. Exact session names and private roots are local
+configuration and are not part of this public contract. A current-employment
+agent reports to the platform chief; the career-transition PIC is a boundary peer
+only and never sees employer work or private detail.
+
 ## Prerequisites
 
 - A POSIX-like environment with Bash.

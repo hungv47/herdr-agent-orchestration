@@ -101,6 +101,26 @@ check_routing_policy() {
 check_routing_policy AGENTS.md
 check_routing_policy README.md
 
+check_session_routing() {
+  local file=$1
+  local phrase
+  local required_session_phrases=(
+    'personal task'
+    'business or product-code'
+    'current-employment'
+    'only three sessions'
+  )
+  for phrase in "${required_session_phrases[@]}"; do
+    grep -Fq "$phrase" "$file" || {
+      printf 'Session routing missing in %s: %s\n' "$file" "$phrase" >&2
+      exit 1
+    }
+  done
+}
+
+check_session_routing AGENTS.md
+check_session_routing README.md
+
 for script in scripts/install.sh scripts/verify.sh; do
   [[ -x "$script" ]] || { printf 'Script is not executable: %s\n' "$script" >&2; exit 1; }
   bash -n "$script"

@@ -30,6 +30,22 @@ Never use a fourth model or harness.
 
 Update this example when the approved routing changes.
 
+## Herdr sessions and routing
+
+All worker execution runs inside Herdr. Route each task to the session that owns
+its surface:
+
+- a personal task → the personal session;
+- a business or product-code task → the business/product session;
+- a current-employment task, rooted in the (private) employer workspace, →
+  the current-employment session.
+
+The exact session names and their private roots are local configuration and are
+not part of this public contract. Keep only three sessions; never create an
+additional one. A current-employment agent reports to the platform chief. The
+career-transition PIC is a peer at the boundary only and never sees employer work
+or private detail.
+
 ## Orchestrator contract
 
 The orchestrator is captain and chief of agents, and the sole user contact for its thread. It stays orchestrating and communicating with the user throughout: it discusses decisions, asks only for decisions, blockers, or material ambiguity, and continuously reports progress and results.
