@@ -25,19 +25,29 @@ Herdr hosts execution sessions, tabs, and worker panes. Hermes can host the capt
 
 The role gate is simple: an agent is a worker when `AGENT_ROLE=worker` or when it is a child/non-root session. Otherwise it is an orchestrator.
 
-This order is intentionally **editable**. It is a routing policy, not a permanent model choice:
+This ordered default/fallback policy is intentionally **editable**. It is a routing policy, not a permanent model choice, and it contains exactly three approved entries:
 
 ```yaml
 worker_preference:
-  - model: Grok 4.5
-    cli: Grok CLI
-  - model: GPT-5.6 Luna
-    cli: Codex CLI or Pi CLI
   - model: DeepSeek V4 Flash
-    cli: OpenCode or Cline CLI
+    effort: xhigh
+    cli: Cline CLI
+    role: normal first-choice worker; Cline CLI only
+  - model: GPT-5.6 Luna
+    effort: Max only
+    cli: Codex CLI or Pi CLI
+    role: second choice; Max effort is mandatory
+  - model: Grok 4.5
+    effort: high
+    cli: Grok CLI
+    role: final fallback
 ```
 
-Use the highest-ranked approved option for a primary, high-judgment worker. Fan out independent, bounded support or review work to approved lower-cost workers when useful. Edit this example whenever the approved routing preference changes.
+Use entries in order: DeepSeek V4 Flash at xhigh, then GPT-5.6 Luna at Max only, then Grok 4.5 at high. DeepSeek is the normal first choice; Luna Max effort is mandatory whenever Luna is used; Grok is the final fallback. Classify scope, risk, and authorization before capacity checks or spawning, but do not let task category promote Grok or reduce effort. If all three entries are unavailable, wait/retry/report blocked. External visibility is a safety/authorization gate.
+
+Never use a fourth model or harness.
+
+Edit this example whenever the approved routing preference changes.
 
 ## Prerequisites
 

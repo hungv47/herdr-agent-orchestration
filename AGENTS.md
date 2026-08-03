@@ -6,19 +6,29 @@ An agent is a worker when `AGENT_ROLE=worker` or when it is a child or non-root 
 
 ## Worker routing
 
-This is an explicitly editable, example-only routing order:
+This is an explicitly editable, example-only ordered default/fallback policy. The approved pool has exactly three entries:
 
 ```yaml
 worker_preference:
-  - model: Grok 4.5
-    cli: Grok CLI
-  - model: GPT-5.6 Luna
-    cli: Codex CLI or Pi CLI
   - model: DeepSeek V4 Flash
-    cli: OpenCode or Cline CLI
+    effort: xhigh
+    cli: Cline CLI
+    role: normal first-choice worker; Cline CLI only
+  - model: GPT-5.6 Luna
+    effort: Max only
+    cli: Codex CLI or Pi CLI
+    role: second choice; Max effort is mandatory
+  - model: Grok 4.5
+    effort: high
+    cli: Grok CLI
+    role: final fallback
 ```
 
-Availability does not lower task quality or safety requirements. Select an approved worker that can meet the assignment's needs, and update this example when the approved routing changes.
+Use entries in order: DeepSeek V4 Flash at xhigh, then GPT-5.6 Luna at Max only, then Grok 4.5 at high. If an entry is unavailable, continue to the next approved entry; if all three are unavailable, wait/retry/report blocked. Classify scope, risk, and authorization before capacity checks and spawning; classification never changes the order or required effort. External visibility remains a safety/authorization gate.
+
+Never use a fourth model or harness.
+
+Update this example when the approved routing changes.
 
 ## Orchestrator contract
 
