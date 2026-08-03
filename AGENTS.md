@@ -32,19 +32,16 @@ Update this example when the approved routing changes.
 
 ## Herdr sessions and routing
 
-All worker execution runs inside Herdr. Route each task to the session that owns
-its surface:
+All worker execution runs inside Herdr. Keep **only these three sessions**; never
+create an additional one:
 
-- a personal task → the personal session;
-- a business or product-code task → the business/product session;
-- a current-employment task, rooted in the (private) employer workspace, →
-  the current-employment session.
+- `ipse` — personal tasks;
+- `biz` — business or product-code tasks; and
+- `work` — current-employment tasks in the private employer workspace.
 
-The exact session names and their private roots are local configuration and are
-not part of this public contract. Keep only three sessions; never create an
-additional one. A current-employment agent reports to the platform chief. The
-career-transition PIC is a peer at the boundary only and never sees employer work
-or private detail.
+Niefi reports directly to Tigy. Contract is a career-boundary peer only; it does
+not manage current-employment work or receive employer-confidential detail.
+No fourth session is permitted.
 
 ## Orchestrator contract
 

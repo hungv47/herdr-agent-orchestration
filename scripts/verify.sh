@@ -103,19 +103,42 @@ check_routing_policy README.md
 
 check_session_routing() {
   local file=$1
-  local phrase
+  local phrase session_text
+  session_text=$(tr '\n' ' ' < "$file")
   local required_session_phrases=(
-    'personal task'
-    'business or product-code'
     'current-employment'
-    'only three sessions'
+    'only these three sessions'
+    'No fourth session is permitted.'
+    'Niefi reports directly to Tigy'
+    'Contract is a career-boundary peer only'
   )
   for phrase in "${required_session_phrases[@]}"; do
-    grep -Fq "$phrase" "$file" || {
+    printf '%s' "$session_text" | grep -Fq "$phrase" || {
       printf 'Session routing missing in %s: %s\n' "$file" "$phrase" >&2
       exit 1
     }
   done
+  if [[ "$file" == README.md ]]; then
+    for phrase in \
+      '`ipse` — personal work' \
+      '`biz` — business and product-code work' \
+      '`work` — current-employment work in the private employer workspace'; do
+      printf '%s' "$session_text" | grep -Fq "$phrase" || {
+        printf 'Session mapping missing in %s: %s\n' "$file" "$phrase" >&2
+        exit 1
+      }
+    done
+  else
+    for phrase in \
+      '`ipse` — personal tasks' \
+      '`biz` — business or product-code tasks' \
+      '`work` — current-employment tasks in the private employer workspace'; do
+      printf '%s' "$session_text" | grep -Fq "$phrase" || {
+        printf 'Session mapping missing in %s: %s\n' "$file" "$phrase" >&2
+        exit 1
+      }
+    done
+  fi
 }
 
 check_session_routing AGENTS.md
@@ -127,7 +150,7 @@ for script in scripts/install.sh scripts/verify.sh; do
 done
 
 # Build sensitive terms without embedding those private strings as contiguous source text.
-privacy_pattern='hun'"gvio"'|ip'"se"'|/Us'"ers"'/|/ho'"me"'/[^[:space:]/]+|[[:alnum:]._%+-]+'"@"'[[:alnum:].-]+\.[[:alpha:]]{2,}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+privacy_pattern='hun'"gvio"'|/Us'"ers"'/|/ho'"me"'/[^[:space:]/]+|[[:alnum:]._%+-]+'"@"'[[:alnum:].-]+\.[[:alpha:]]{2,}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
 public_text=(
   README.md AGENTS.md LICENSE .gitignore ATTRIBUTION.md
   assets/brand/SOURCES.md assets/brand/herdr-logo.svg
