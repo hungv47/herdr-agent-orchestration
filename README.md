@@ -4,26 +4,31 @@
 
 People are embedding elaborate subagents; this workflow keeps the captain in conversation and lets Herdr host whichever coding workers are useful.
 
-This repository is a portable operating contract for coding-agent orchestration.
+This repository is a portable operating contract for choosing between direct execution and coding-agent orchestration.
 
-The orchestrator is the sole user contact and remains captain throughout the task. It communicates at all times; plans and routes work; spawns and supervises Herdr workers; independently verifies results; remediates through workers; cleans up; and reports the outcome. It never task-executes. All worker execution happens inside Herdr.
+The user-facing captain first evaluates the task, recommends DIY or orchestration, and asks the user to choose unless the request already selected a mode. In DIY mode the captain executes and verifies directly. In orchestrate mode it remains the sole user contact, routes all task action through Herdr workers, independently verifies read-only, remediates through workers, cleans up, and reports.
 
 ## Architecture
 
 ```text
-User ↔ Orchestrator (captain)
-             └─ Herdr execution space
-                ├─ Hermes: orchestrator-facing agent harness
-                ├─ CodexBar: capacity and model-availability view
-                ├─ Buzz: complementary agent interface
-                └─ Pi: coding-agent CLI option
+User ↔ Captain ── DIY mode: direct execution
+          └────── Orchestrate mode: Herdr execution space
+                  ├─ Hermes: captain-facing agent harness
+                  ├─ CodexBar: capacity and model-availability view
+                  ├─ Buzz: complementary agent interface
+                  └─ Pi: coding-agent CLI option
 ```
 
-Herdr hosts execution sessions, tabs, and worker panes. Hermes can host the captain. CodexBar is an operational capacity view. Buzz and Pi are agent interfaces. These tools support the workflow; none changes the role gate or the rule that workers execute in Herdr.
+Herdr hosts orchestrated execution sessions, tabs, and worker panes. Hermes can host the captain. CodexBar is an operational capacity view. Buzz and Pi are agent interfaces. These tools support the workflow; none changes the role or mode gates.
 
-## Roles and routing
+## Mode choice
 
-The role gate is simple: an agent is a worker when `AGENT_ROLE=worker` or when it is a child/non-root session. Otherwise it is an orchestrator.
+A direct-open agent is the captain unless it is explicitly a worker or child session. Before actionable side effects, assess scope, risk, coordination cost, parallelism, and duration. Say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask only if the user has not chosen.
+
+- **DIY:** best for small or borderline work; execute and verify directly.
+- **Orchestrate:** use when multiple workstreams, risk, duration, specialization, or independent review justify the overhead; perform no captain task writes.
+
+Explicit `DIY` / `do it yourself` / `execute directly` or `orchestrate` / `delegate` / `use Herdr` language selects immediately. The user's choice wins. Keep it for the same scope; reassess only after material scope or risk change. Safety confirmations remain separate.
 
 This ordered default/fallback policy is intentionally **editable**. It is a routing policy, not a permanent model choice, and it contains exactly three approved entries:
 
@@ -43,7 +48,7 @@ worker_preference:
     role: final fallback
 ```
 
-Use entries in order: DeepSeek V4 Flash at xhigh, then GPT-5.6 Luna at Max only, then Grok 4.5 at high. DeepSeek is the normal first choice; Luna Max effort is mandatory whenever Luna is used; Grok is the final fallback. Classify scope, risk, and authorization before capacity checks or spawning, but do not let task category promote Grok or reduce effort. If all three entries are unavailable, wait/retry/report blocked. External visibility is a safety/authorization gate.
+When orchestration is selected, use entries in order: DeepSeek V4 Flash at xhigh, then GPT-5.6 Luna at Max only, then Grok 4.5 at high. DeepSeek is the normal first choice; Luna Max effort is mandatory whenever Luna is used; Grok is the final fallback. Classify scope, risk, and authorization before capacity checks or spawning, but do not let task category promote Grok or reduce effort. If all three entries are unavailable, wait/retry/report blocked. External visibility is a safety/authorization gate.
 
 Never use a fourth model or harness.
 
@@ -58,16 +63,14 @@ sessions**; never create another:
 - `biz` — business and product-code work; and
 - `work` — current-employment work in the private employer workspace.
 
-Niefi reports directly to Tigy. Contract is a career-boundary peer only; it does
-not manage current-employment work or receive employer-confidential detail.
 No fourth session is permitted.
 
 ## Prerequisites
 
 - A POSIX-like environment with Bash.
 - A checked-out copy of this repository.
-- Herdr installed and configured for the execution session.
-- At least one approved worker CLI and its credentials, when dispatching workers.
+- Herdr installed and configured when using orchestrate mode.
+- At least one approved worker CLI and its credentials when dispatching workers.
 
 The repository’s checks use only Bash and standard POSIX utilities; they do not require a package manager or optional dependencies.
 
@@ -95,14 +98,11 @@ bash scripts/verify.sh --installed
 
 ## Captain loop
 
-1. Classify the request and choose the appropriate Herdr execution space.
-2. Preflight the workspace, constraints, and approved worker capacity.
-3. Plan the work and identify independent bounded assignments.
-4. Create Herdr worker panes and submit every ready brief.
-5. Supervise progress and keep the user informed.
-6. Verify worker output read-only against the acceptance criteria.
-7. Remediate gaps by re-briefing workers; never take over task execution.
-8. Close only panes created by this captain, then report evidence and remaining risks.
+1. Assess and obtain the mode.
+2. DIY: execute, verify, and report.
+3. Orchestrate: choose the Herdr session and write bounded briefs.
+4. Dispatch, supervise, verify read-only, and remediate through workers.
+5. Close only panes you created; report evidence and remaining risks.
 
 ## Bounded brief contract
 

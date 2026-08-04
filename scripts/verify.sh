@@ -101,6 +101,55 @@ check_routing_policy() {
 check_routing_policy AGENTS.md
 check_routing_policy README.md
 
+check_execution_mode() {
+  local file=$1 phrase
+  local required_phrases=(
+    'Recommendation: DIY|orchestrate'
+    'Choose: DIY or orchestrate'
+    'coordination cost'
+    'borderline'
+    'multiple workstreams'
+    'do it yourself'
+    'execute directly'
+    'use Herdr'
+    "user's choice wins"
+    'same scope'
+    'material scope or risk change'
+    '**DIY:**'
+    '**Orchestrate:**'
+    'perform no captain task writes'
+  )
+  for phrase in "${required_phrases[@]}"; do
+    grep -Fq "$phrase" "$file" || {
+      printf 'Execution-mode policy missing in %s: %s\n' "$file" "$phrase" >&2
+      exit 1
+    }
+  done
+  for stale in \
+    'Every actionable request is delegated through Herdr' \
+    'It never task-executes. All worker execution happens inside Herdr.' \
+    'Otherwise it is an orchestrator.'; do
+    ! grep -Fq "$stale" "$file" || {
+      printf 'Stale always-orchestrate policy in %s: %s\n' "$file" "$stale" >&2
+      exit 1
+    }
+  done
+}
+
+check_execution_mode AGENTS.md
+check_execution_mode README.md
+
+for phrase in \
+  'A stall never changes mode' \
+  'recommend DIY rather than switching yourself' \
+  'Workers receive bounded briefs' \
+  'Close only panes you created'; do
+  grep -Fq "$phrase" AGENTS.md || {
+    printf 'Orchestrate-mode contract missing in AGENTS.md: %s\n' "$phrase" >&2
+    exit 1
+  }
+done
+
 check_session_routing() {
   local file=$1
   local phrase session_text
@@ -109,12 +158,16 @@ check_session_routing() {
     'current-employment'
     'only these three sessions'
     'No fourth session is permitted.'
-    'Niefi reports directly to Tigy'
-    'Contract is a career-boundary peer only'
   )
   for phrase in "${required_session_phrases[@]}"; do
     printf '%s' "$session_text" | grep -Fq "$phrase" || {
       printf 'Session routing missing in %s: %s\n' "$file" "$phrase" >&2
+      exit 1
+    }
+  done
+  for stale in 'Niefi reports directly to Tigy' 'Contract is a career-boundary peer only'; do
+    ! printf '%s' "$session_text" | grep -Fq "$stale" || {
+      printf 'Unrelated reporting policy remains in %s: %s\n' "$file" "$stale" >&2
       exit 1
     }
   done
