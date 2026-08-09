@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the public repository and, optionally, the installed policy links.
+# Verify the public package, evaluator behavior, installer, and optional live links.
 set -euo pipefail
 
 usage() {
@@ -18,7 +18,20 @@ esac
 : "${HOME:?HOME must be set}"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo_root=$(cd -- "$script_dir/.." && pwd -P)
+skill_root="$repo_root/skills/ops-herdr-orchestration"
+eval_script="$skill_root/scripts/eval_run.py"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/herdr-public-verify.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 cd "$repo_root"
+
+fail() {
+  printf 'Verification failed: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  grep -Fq "$2" "$1" || fail "$1 missing: $2"
+}
 
 required_files=(
   README.md AGENTS.md LICENSE .gitignore ATTRIBUTION.md
@@ -29,210 +42,192 @@ required_files=(
   assets/brand/herdr-logo.svg
   assets/brand/hermes-logo.png
   scripts/install.sh scripts/verify.sh
+  skills/ops-herdr-orchestration/SKILL.md
+  skills/ops-herdr-orchestration/references/efficiency-eval.md
+  skills/ops-herdr-orchestration/scripts/eval_run.py
 )
 for file in "${required_files[@]}"; do
-  [[ -f "$file" ]] || { printf 'Missing required file: %s\n' "$file" >&2; exit 1; }
+  [[ -f "$file" ]] || fail "missing required file: $file"
 done
-
-check_routing_policy() {
-  local file=$1
-  local deepseek_line luna_line grok_line phrase
-  local required_phrases=(
-    'ordered default/fallback'
-    'exactly three'
-    'model: DeepSeek V4 Flash'
-    'effort: xhigh'
-    'cli: Cline CLI'
-    'Cline CLI only'
-    'normal first-choice worker'
-    'model: GPT-5.6 Luna'
-    'effort: Max only'
-    'cli: Codex CLI or Pi CLI'
-    'Max effort is mandatory'
-    'model: Grok 4.5'
-    'effort: high'
-    'cli: Grok CLI'
-    'final fallback'
-    'DeepSeek V4 Flash at xhigh'
-    'GPT-5.6 Luna at Max only'
-    'Grok 4.5 at high'
-    'wait/retry/report blocked'
-    'Never use a fourth model or harness'
-    'scope, risk, and authorization'
-    'safety/authorization gate'
-  )
-  for phrase in "${required_phrases[@]}"; do
-    grep -Fq "$phrase" "$file" || {
-      printf 'Routing policy missing in %s: %s\n' "$file" "$phrase" >&2
-      exit 1
-    }
-  done
-
-  deepseek_line=$(grep -n -m1 -F '  - model: DeepSeek V4 Flash' "$file" | cut -d: -f1)
-  luna_line=$(grep -n -m1 -F '  - model: GPT-5.6 Luna' "$file" | cut -d: -f1)
-  grok_line=$(grep -n -m1 -F '  - model: Grok 4.5' "$file" | cut -d: -f1)
-  if (( deepseek_line >= luna_line || luna_line >= grok_line )); then
-    printf 'Routing policy order is not DeepSeek → Luna → Grok in %s\n' "$file" >&2
-    exit 1
-  fi
-
-  for stale in \
-    'highest-ranked approved option' \
-    'high-judgment worker' \
-    'Fan out independent, bounded support or review' \
-    'Grok 4.5 primary' \
-    'DeepSeek V4 Flash support-only' \
-    'Luna at high'; do
-    ! grep -Fq "$stale" "$file" || {
-      printf 'Stale routing policy in %s: %s\n' "$file" "$stale" >&2
-      exit 1
-    }
-  done
-  ! grep -Fq 'cli: OpenCode or Cline CLI' "$file" || {
-    printf 'Stale DeepSeek OpenCode mapping in %s\n' "$file" >&2
-    exit 1
-  }
-  ! grep -Fq 'DeepSeek V4 Flash at xhigh via OpenCode' "$file" || {
-    printf 'Stale DeepSeek OpenCode mapping in %s\n' "$file" >&2
-    exit 1
-  }
-}
-
-check_routing_policy AGENTS.md
-check_routing_policy README.md
-
-check_execution_mode() {
-  local file=$1 phrase
-  local required_phrases=(
-    'Recommendation: DIY|orchestrate'
-    'Choose: DIY or orchestrate'
-    'coordination cost'
-    'borderline'
-    'multiple workstreams'
-    'do it yourself'
-    'execute directly'
-    'use Herdr'
-    "user's choice wins"
-    'same scope'
-    'material scope or risk change'
-    '**DIY:**'
-    '**Orchestrate:**'
-    'perform no captain task writes'
-  )
-  for phrase in "${required_phrases[@]}"; do
-    grep -Fq "$phrase" "$file" || {
-      printf 'Execution-mode policy missing in %s: %s\n' "$file" "$phrase" >&2
-      exit 1
-    }
-  done
-  for stale in \
-    'Every actionable request is delegated through Herdr' \
-    'It never task-executes. All worker execution happens inside Herdr.' \
-    'Otherwise it is an orchestrator.'; do
-    ! grep -Fq "$stale" "$file" || {
-      printf 'Stale always-orchestrate policy in %s: %s\n' "$file" "$stale" >&2
-      exit 1
-    }
-  done
-}
-
-check_execution_mode AGENTS.md
-check_execution_mode README.md
-
-for phrase in \
-  'A stall never changes mode' \
-  'recommend DIY rather than switching yourself' \
-  'Workers receive bounded briefs' \
-  'Close only panes you created'; do
-  grep -Fq "$phrase" AGENTS.md || {
-    printf 'Orchestrate-mode contract missing in AGENTS.md: %s\n' "$phrase" >&2
-    exit 1
-  }
-done
-
-check_session_routing() {
-  local file=$1
-  local phrase session_text
-  session_text=$(tr '\n' ' ' < "$file")
-  local required_session_phrases=(
-    'current-employment'
-    'only these three sessions'
-    'No fourth session is permitted.'
-  )
-  for phrase in "${required_session_phrases[@]}"; do
-    printf '%s' "$session_text" | grep -Fq "$phrase" || {
-      printf 'Session routing missing in %s: %s\n' "$file" "$phrase" >&2
-      exit 1
-    }
-  done
-  for stale in 'Niefi reports directly to Tigy' 'Contract is a career-boundary peer only'; do
-    ! printf '%s' "$session_text" | grep -Fq "$stale" || {
-      printf 'Unrelated reporting policy remains in %s: %s\n' "$file" "$stale" >&2
-      exit 1
-    }
-  done
-  if [[ "$file" == README.md ]]; then
-    for phrase in \
-      '`ipse` — personal work' \
-      '`biz` — business and product-code work' \
-      '`work` — current-employment work in the private employer workspace'; do
-      printf '%s' "$session_text" | grep -Fq "$phrase" || {
-        printf 'Session mapping missing in %s: %s\n' "$file" "$phrase" >&2
-        exit 1
-      }
-    done
-  else
-    for phrase in \
-      '`ipse` — personal tasks' \
-      '`biz` — business or product-code tasks' \
-      '`work` — current-employment tasks in the private employer workspace'; do
-      printf '%s' "$session_text" | grep -Fq "$phrase" || {
-        printf 'Session mapping missing in %s: %s\n' "$file" "$phrase" >&2
-        exit 1
-      }
-    done
-  fi
-}
-
-check_session_routing AGENTS.md
-check_session_routing README.md
 
 for script in scripts/install.sh scripts/verify.sh; do
-  [[ -x "$script" ]] || { printf 'Script is not executable: %s\n' "$script" >&2; exit 1; }
+  [[ -x "$script" ]] || fail "script is not executable: $script"
   bash -n "$script"
 done
+[[ -x "$eval_script" ]] || fail "evaluator is not executable"
+python3 -m py_compile "$eval_script"
 
-# Build sensitive terms without embedding those private strings as contiguous source text.
+for file in AGENTS.md README.md; do
+  for phrase in \
+    'Recommendation: DIY|orchestrate' \
+    'Choose: DIY or orchestrate' \
+    'strongest available reasoning model' \
+    'cheaper or free models' \
+    'expected execution savings' \
+    'exactly two' \
+    'model: DeepSeek V4 Flash' \
+    'effort: xhigh' \
+    'cli: OpenCode or Cline CLI' \
+    'model: GPT-5.6 Luna' \
+    'effort: Max' \
+    'cli: Pi CLI' \
+    'Never use a third model or harness' \
+    'not an automatic duplicate pair' \
+    'whole, independently verifiable deliverable' \
+    'verifiable bridge' \
+    'at most one corrective prompt' \
+    'A timeout is not evidence'; do
+    need "$file" "$phrase"
+  done
+  [[ $(grep -c '^  - model:' "$file") -eq 2 ]] || fail "$file worker pool is not exactly two entries"
+  for stale in \
+    'model: Grok 4.5' \
+    'Cline CLI only' \
+    'cli: Codex CLI or Pi CLI' \
+    'Never use a fourth model or harness' \
+    'OpenCode and Cline CLIs in parallel'; do
+    ! grep -Fq "$stale" "$file" || fail "$file retains stale routing: $stale"
+  done
+done
+
+for phrase in \
+  'Default to one worker' \
+  'fewest whole, independently verifiable deliverables' \
+  'strongest available reasoning model' \
+  'cheaper or free models' \
+  'outbound bridge' \
+  'inbound bridge' \
+  'one initial brief plus one correction' \
+  'efficiency preflight' \
+  'final eval'; do
+  need "$skill_root/SKILL.md" "$phrase"
+done
+
+for phrase in \
+  'accepted-output ratio' \
+  'prompt loops' \
+  'token budgets' \
+  'compact outbound bridge' \
+  'compact inbound bridge'; do
+  need "$skill_root/references/efficiency-eval.md" "$phrase"
+done
+
+# Behavioral eval: useful independent work passes; granular work, overlap,
+# retry loops, and budget overruns fail.
+cat >"$tmp/good.json" <<'JSON'
+{
+  "schema": "herdr-orchestration-run/v1",
+  "objective": "Ship two independent verified outputs",
+  "workers": [
+    {
+      "id": "docs", "deliverable": "Publish and verify the complete operator contract",
+      "delegation_reason": "parallel-independent", "writable_paths": ["docs/contract.md"],
+      "semantic_surfaces": ["operator-contract"], "runtime_resources": [],
+      "acceptance": ["test -s docs/contract.md"], "stop_condition": "stop on scope conflict",
+      "return_format": "changed paths and evidence", "parallel_group": "wave-1", "depends_on": [],
+      "prompt_count": 1, "correction_count": 0, "same_blocker_repeated": false,
+      "outcome": "accepted", "result_used": true, "evidence": ["contract check passed"],
+      "closure_reason": null, "token_budget": 8000, "tokens_used": 5000
+    },
+    {
+      "id": "test", "deliverable": "Add and verify the independent regression coverage",
+      "delegation_reason": "parallel-independent", "writable_paths": ["tests/contract.sh"],
+      "semantic_surfaces": ["contract-test"], "runtime_resources": [],
+      "acceptance": ["bash tests/contract.sh"], "stop_condition": "stop on scope conflict",
+      "return_format": "changed paths and evidence", "parallel_group": "wave-1", "depends_on": [],
+      "prompt_count": 2, "correction_count": 1, "same_blocker_repeated": false,
+      "outcome": "accepted", "result_used": true, "evidence": ["test passed"],
+      "closure_reason": null, "token_budget": null, "tokens_used": null
+    }
+  ]
+}
+JSON
+python3 "$eval_script" --phase preflight "$tmp/good.json" >/dev/null || fail "good preflight rejected"
+python3 "$eval_script" --phase final "$tmp/good.json" >/dev/null || fail "good final eval rejected"
+
+cat >"$tmp/granular.json" <<'JSON'
+{"schema":"herdr-orchestration-run/v1","objective":"Look around","workers":[{"id":"reader","deliverable":"Inspect","delegation_reason":"specialization","writable_paths":[],"semantic_surfaces":[],"runtime_resources":[],"acceptance":[],"stop_condition":"","return_format":"notes","parallel_group":null,"depends_on":[],"prompt_count":0,"correction_count":0,"same_blocker_repeated":false,"outcome":"pending","result_used":false,"evidence":[],"closure_reason":null,"token_budget":null,"tokens_used":null}]}
+JSON
+! python3 "$eval_script" --phase preflight "$tmp/granular.json" >/dev/null 2>&1 || fail "granular brief passed"
+
+cat >"$tmp/overlap.json" <<'JSON'
+{"schema":"herdr-orchestration-run/v1","objective":"Parallel edits","workers":[{"id":"a","deliverable":"Finish and verify the first complete output","delegation_reason":"parallel-independent","writable_paths":["shared/config"],"semantic_surfaces":["config"],"runtime_resources":[],"acceptance":["check a"],"stop_condition":"stop","return_format":"evidence","parallel_group":"wave","depends_on":[],"prompt_count":0,"correction_count":0,"same_blocker_repeated":false,"outcome":"pending","result_used":false,"evidence":[],"closure_reason":null,"token_budget":null,"tokens_used":null},{"id":"b","deliverable":"Finish and verify the second complete output","delegation_reason":"parallel-independent","writable_paths":["shared"],"semantic_surfaces":["config"],"runtime_resources":[],"acceptance":["check b"],"stop_condition":"stop","return_format":"evidence","parallel_group":"wave","depends_on":[],"prompt_count":0,"correction_count":0,"same_blocker_repeated":false,"outcome":"pending","result_used":false,"evidence":[],"closure_reason":null,"token_budget":null,"tokens_used":null}]}
+JSON
+! python3 "$eval_script" --phase preflight "$tmp/overlap.json" >/dev/null 2>&1 || fail "overlapping parallel work passed"
+
+cat >"$tmp/loop.json" <<'JSON'
+{"schema":"herdr-orchestration-run/v1","objective":"Ship one output","workers":[{"id":"loop","deliverable":"Finish and verify the complete requested output","delegation_reason":"specialization","writable_paths":["out.md"],"semantic_surfaces":["output"],"runtime_resources":[],"acceptance":["test -s out.md"],"stop_condition":"stop after correction","return_format":"evidence","parallel_group":null,"depends_on":[],"prompt_count":4,"correction_count":3,"same_blocker_repeated":true,"outcome":"blocked","result_used":false,"evidence":[],"closure_reason":"same blocker repeated","token_budget":5000,"tokens_used":9000}]}
+JSON
+! python3 "$eval_script" --phase final "$tmp/loop.json" >/dev/null 2>&1 || fail "prompt loop passed"
+
+# Installer preview must not create files; apply must wire policies, global skills,
+# and every existing Hermes profile to this checkout.
+test_home="$tmp/home"
+mkdir -p "$test_home/.hermes/profiles/alpha" "$test_home/.hermes/profiles/beta"
+HOME="$test_home" bash scripts/install.sh >/dev/null
+[[ ! -e "$test_home/.agents/AGENTS.md" ]] || fail "installer preview wrote files"
+HOME="$test_home" bash scripts/install.sh --apply >/dev/null
+for target in \
+  "$test_home/.agents/AGENTS.md" \
+  "$test_home/.codex/AGENTS.md" \
+  "$test_home/.pi/agent/AGENTS.md" \
+  "$test_home/.config/opencode/AGENTS.md" \
+  "$test_home/.claude/CLAUDE.md" \
+  "$test_home/.grok/AGENTS.md" \
+  "$test_home/.hermes/AGENTS.md"; do
+  [[ -L "$target" && "$target" -ef "$repo_root/AGENTS.md" ]] || fail "invalid test policy link: $target"
+done
+for target in \
+  "$test_home/.agents/skills/ops-herdr-orchestration" \
+  "$test_home/.pi/agent/skills/ops-herdr-orchestration" \
+  "$test_home/.grok/skills/ops-herdr-orchestration" \
+  "$test_home/.hermes/skills/ops-herdr-orchestration" \
+  "$test_home/.hermes/profiles/alpha/skills/ops-herdr-orchestration" \
+  "$test_home/.hermes/profiles/beta/skills/ops-herdr-orchestration"; do
+  [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid test skill link: $target"
+done
+
+# Build sensitive terms without keeping private strings contiguous in source.
 privacy_pattern='hun'"gvio"'|/Us'"ers"'/|/ho'"me"'/[^[:space:]/]+|[[:alnum:]._%+-]+'"@"'[[:alnum:].-]+\.[[:alpha:]]{2,}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
 public_text=(
   README.md AGENTS.md LICENSE .gitignore ATTRIBUTION.md
   assets/brand/SOURCES.md assets/brand/herdr-logo.svg
   scripts/install.sh scripts/verify.sh
+  skills/ops-herdr-orchestration/SKILL.md
+  skills/ops-herdr-orchestration/references/efficiency-eval.md
+  skills/ops-herdr-orchestration/scripts/eval_run.py
 )
 for file in "${public_text[@]}"; do
   if grep -Ein "$privacy_pattern" "$file"; then
-    printf 'Privacy scan failed: %s\n' "$file" >&2
-    exit 1
+    fail "privacy scan failed: $file"
   fi
 done
 
 if "$installed"; then
-  source_file="$repo_root/AGENTS.md"
-  targets=(
-    "$HOME/.agents/AGENTS.md"
-    "$HOME/.codex/AGENTS.md"
-    "$HOME/.pi/agent/AGENTS.md"
-    "$HOME/.config/opencode/AGENTS.md"
-    "$HOME/.claude/CLAUDE.md"
-    "$HOME/.grok/AGENTS.md"
-    "$HOME/.hermes/AGENTS.md"
-  )
-  for target in "${targets[@]}"; do
-    [[ -L "$target" && "$target" -ef "$source_file" ]] || {
-      printf 'Invalid installed policy link: %s\n' "$target" >&2
-      exit 1
-    }
+  for target in \
+    "$HOME/.agents/AGENTS.md" \
+    "$HOME/.codex/AGENTS.md" \
+    "$HOME/.pi/agent/AGENTS.md" \
+    "$HOME/.config/opencode/AGENTS.md" \
+    "$HOME/.claude/CLAUDE.md" \
+    "$HOME/.grok/AGENTS.md" \
+    "$HOME/.hermes/AGENTS.md"; do
+    [[ -L "$target" && "$target" -ef "$repo_root/AGENTS.md" ]] || fail "invalid installed policy link: $target"
   done
+  for target in \
+    "$HOME/.agents/skills/ops-herdr-orchestration" \
+    "$HOME/.pi/agent/skills/ops-herdr-orchestration" \
+    "$HOME/.grok/skills/ops-herdr-orchestration" \
+    "$HOME/.hermes/skills/ops-herdr-orchestration"; do
+    [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid installed skill link: $target"
+  done
+  if [[ -d "$HOME/.hermes/profiles" ]]; then
+    for profile in "$HOME/.hermes/profiles"/*; do
+      [[ -d "$profile" ]] || continue
+      target="$profile/skills/ops-herdr-orchestration"
+      [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid profile skill link: $target"
+    done
+  fi
 fi
 
-printf 'Verification passed%s.\n' "$($installed && printf ' (installed links checked)')"
+printf 'Verification passed%s.\n' "$("$installed" && printf ' (installed links checked)')"
