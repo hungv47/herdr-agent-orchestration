@@ -99,3 +99,24 @@ done
 for target in "${skill_targets[@]}"; do
   install_target "$source_skill" "$target" skill
 done
+
+# Buzz owns its Nest file, so update only this repository's marked fragment.
+if [[ -f "$HOME/.buzz/AGENTS.md" ]]; then
+  if ! "$apply"; then
+    printf 'would refresh Buzz policy fragment: %s\n' "$HOME/.buzz/AGENTS.md"
+  else
+    begin='<!-- BEGIN HERDR ORCHESTRATION -->'
+    end='<!-- END HERDR ORCHESTRATION -->'
+    tmp=$(mktemp "${TMPDIR:-/tmp}/buzz-agents.XXXXXX")
+    awk -v begin="$begin" -v end="$end" '
+      $0 == begin { skip=1; next }
+      $0 == end { skip=0; next }
+      !skip { print }
+    ' "$HOME/.buzz/AGENTS.md" >"$tmp"
+    printf '\n%s\n' "$begin" >>"$tmp"
+    cat "$source_file" >>"$tmp"
+    printf '%s\n' "$end" >>"$tmp"
+    mv "$tmp" "$HOME/.buzz/AGENTS.md"
+    printf 'refreshed Buzz policy fragment: %s\n' "$HOME/.buzz/AGENTS.md"
+  fi
+fi

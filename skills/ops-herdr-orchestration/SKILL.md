@@ -1,83 +1,67 @@
 ---
 name: ops-herdr-orchestration
 description: "Use when choosing DIY vs Herdr, briefing or supervising Herdr workers, preventing retry loops, or auditing orchestration token efficiency."
-version: 1.0.0
+version: 6.0.0
 license: MIT
 platforms: [macos, linux]
-metadata:
-  hermes:
-    tags: [herdr, orchestration, multi-cli, manager-worker, token-efficiency]
 ---
 
 # Herdr orchestration
 
-Binding policy: the repository root `AGENTS.md`.
+Binding policy: `AGENTS.md`.
 
-- Use the strongest available reasoning model for captain judgment and cheaper or free models for bounded execution.
-- Prefer DIY for small or borderline work. Orchestration must save more execution cost than it adds in coordination.
-- In DIY mode, execute and verify directly.
-- In orchestrate mode, the captain performs no task writes and remains the sole user contact.
+## Choose the cheaper execution path
 
-## Dispatch gate
+- DIY for small, cohesive, borderline, or read-mostly work.
+- Orchestrate only when independent workstreams, specialization, risk, or duration repay dispatch and verification overhead.
+- Keep the selected mode for the same scope. A stalled worker never changes it.
+- In orchestrate mode the captain stays the sole user contact and performs no task writes.
 
-Translate the request into the fewest whole, independently verifiable deliverables. Default to one worker. Do not delegate discovery, planning fragments, status checks, or summaries the captain can do read-only.
+## Runtime gate
 
-Parallelize only when every candidate has satisfied dependencies, distinct writable and semantic surfaces, no shared runtime singleton, and cheaper integration than serial execution. Use the smallest sufficient wave. OpenCode and Cline are two DeepSeek lanes, not an automatic duplicate pair. Duplicate scope is reserved for justified read-only independent review.
+```bash
+headroom doctor
+herdr --session <ipse|biz|work> agent list
+```
 
-Before dispatch, read [efficiency-eval.md](references/efficiency-eval.md), create its compact trace under the system temporary directory, and run the preflight. The trace is orchestration control data, not repository output.
+Headroom must be healthy. Worker order is binding:
 
-## Verifiable bridge
+1. DeepSeek V4 Flash `xhigh` through OpenCode.
+2. GPT-5.6 Luna `Max` through Codex.
 
-Every worker gets one outbound bridge and returns one inbound bridge.
+Do not use Pi, Cline, or another fallback. Default to one worker and one whole, independently verifiable deliverable. Parallelize only disjoint deliverables with satisfied dependencies, separate writable and semantic surfaces, and lower integration cost than serial work.
 
-Outbound:
+## Compact bridge
 
-1. one stable worker identity;
-2. one finished outcome;
-3. exact writable paths;
-4. non-goals and external-action authority;
-5. acceptance commands or observables;
-6. required evidence and return format; and
-7. a stop condition that prevents guessing or replay loops.
+The initial brief must be at most 1,200 characters:
 
-Inbound:
+1. `role=worker; outcome=` one finished result.
+2. `write=` exact paths; all other paths are read-only.
+3. `non-goals=` exclusions and external-action limits.
+4. `accept=` commands or observable checks.
+5. `return=` changed paths, check results, blocker; then stop.
 
-1. the same worker identity;
-2. changed artifact references;
-3. concise acceptance evidence; and
-4. an accepted, discarded, or blocked outcome.
+Workers do not delegate, narrate progress, write plans, or do discovery the captain can do read-only. Give one initial prompt and at most one corrective prompt.
 
-The captain independently verifies the inbound evidence before using the result. Output that does not feed the delivered result closes as discarded with a concrete reason.
+## Hard budgets
+
+- 10 minutes wall time; 20 only when the brief states why.
+- 40 tool calls; 80 only for explicitly substantial work.
+- one correction; no unchanged replay.
+- a token ceiling stated before dispatch when usage is exposed.
+- five minutes without material progress is an interrupt.
+
+Run `scripts/watch_worker.py --session <session> --agent <name>` after dispatch. It interrupts at the wall or idle limit without closing the pane. Stop earlier after three repeats of the same failing call, blocker, or acceptance failure. Never resend after a wait timeout.
 
 ## Captain loop
 
-1. Evaluate and obtain the mode.
-2. DIY: execute, verify, report, and stop here.
-3. Orchestrate: choose the approved Herdr session and worker pool.
-4. Prove the orchestration value gate, define the fewest whole deliverables, and make the efficiency preflight pass.
-5. Spawn uniquely named workers and confirm each outbound bridge reached one worker.
-6. Supervise with read/wait operations. A timeout is not evidence of a stopped worker, so never resend the brief merely because a wait timed out.
-7. Give at most one corrective prompt. Stop on the same repeated blocker or a second acceptance failure. Switch workers only for a capability-specific blocker and revise the brief.
-8. Verify every inbound bridge read-only, update the trace, and make the final eval pass.
-9. Report accepted and discarded outputs, checks, prompts per worker, and tokens when exposed. Close only resources you created.
+1. Select mode and session; run the runtime gate.
+2. Define the fewest whole deliverables and compact bridge.
+3. Start uniquely named workers in unfocused panes.
+4. Supervise with `get`, `read`, `wait`, and the watcher. Correct once at most.
+5. Verify returned evidence read-only. Accept, discard with a reason, or report blocked.
+6. Close only panes created here. Report outcome and checks, not ceremony.
 
-## Cost rules
+Audit suspect Pi-style JSONL with `scripts/audit_session.py <session.jsonl>`.
 
-- Strong captain, low-cost worker is the intended asymmetry.
-- More workers are not more progress.
-- The hard prompt budget is one initial brief plus one correction.
-- When trustworthy token usage is exposed, record a per-worker budget and actual use.
-- When usage is unavailable, prompt count is the required cost proxy.
-- Never waive a failing eval by rewording and replaying the same task.
-
-## Session map
-
-- `ipse`: personal work
-- `biz`: business and product work
-- `work`: current-employment work
-
-## References
-
-- Policy: repository root `AGENTS.md`
-- Evaluator: `scripts/eval_run.py`
-- Trace contract: [efficiency-eval.md](references/efficiency-eval.md)
+Never self-execute while still in orchestrate mode. If remediation is exhausted, report blocked or recommend DIY and wait for the user to switch.
