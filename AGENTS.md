@@ -21,6 +21,8 @@ Worker order is binding:
 
 Use the first available entry unless the brief requires GPT. A stronger GPT model in Pi needs one-line justification. If none is available, wait/retry/report blocked; never use another model or harness. Do not run OpenCode and Cline on the same deliverable. External visibility requires authorization.
 
+Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`. It locks duplicate deliverables, owns one pane and prompt, enforces budgets, and returns one receipt. Never call raw worker start or prompt commands.
+
 Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint writable and semantic surfaces, separate resources, and cheaper integration than serial work.
 
 Every worker brief is at most 1,200 characters:
@@ -29,12 +31,12 @@ Every worker brief is at most 1,200 characters:
 2. `write=` exact paths; everything else read-only.
 3. `non-goals=` exclusions and external-action limits.
 4. `accept=` commands or observable checks.
-5. `return=` changed paths, check results, blocker; then stop.
+5. `return=accepted|blocked: paths=<...>; checks=<...>; blocker=<...>; then stop`.
 
-Workers do not delegate, narrate progress, or write plans. Give one initial prompt and at most one corrective prompt; never replay an unchanged brief.
+Workers do not delegate, narrate progress, or write plans. The dispatcher sends one prompt; never re-prompt outside it.
 
-Default budget per worker: 10 minutes, 40 tool calls, and a stated token ceiling when usage is exposed. Allow at most 20 minutes or 80 calls only when the brief states why. Interrupt on budget breach, five minutes without material progress, or three repeats of the same failing call/blocker. A wait timeout is not completion and never justifies resending the prompt.
+The dispatcher hard-stops at 10 minutes, five idle minutes, 40 Headroom requests, 80k input tokens, or 20k output tokens. Its substantial tier doubles all but idle time and requires a one-line reason. Cline retains its free-route timeout; transcript audits enforce tool-call limits when available.
 
-The captain verifies returned paths and checks before accepting them. Discard with a concrete reason or report blocked. Close only panes created for the run. Report outcomes and checks, not orchestration ceremony.
+The captain verifies returned paths and checks before accepting them. Discard with a concrete reason or report blocked. Report outcomes and checks, not orchestration ceremony.
 
 Procedure and watcher: `skills/ops-herdr-orchestration/SKILL.md`.

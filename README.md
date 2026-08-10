@@ -4,7 +4,7 @@
 
 A portable Herdr policy for short, verifiable, token-efficient agent sessions.
 
-The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise brief, one correction at most, and hard time/tool/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses captain traffic plus supported worker transports.
+The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise prompt, and hard time/request/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses captain traffic plus supported worker transports.
 
 ## Runtime
 
@@ -25,10 +25,11 @@ OpenCode and Pi route through Headroom. Cline's hosted free provider does not ex
 - Orchestrate only when its savings exceed dispatch and verification cost.
 - Default to one worker and one whole, independently verifiable deliverable.
 - Parallelize only independent, disjoint work with cheaper integration than serial work.
-- Briefs: maximum 1,200 characters; outcome, exact writes, non-goals, acceptance, return-and-stop.
-- Per worker: 10 minutes, 40 tool calls, one corrective prompt, and a token ceiling when available.
-- Interrupt after five minutes idle, three repeated failures, or any budget breach.
+- Briefs: maximum 1,200 characters; outcome, exact writes, non-goals, acceptance, and an exact `paths=; checks=; blocker=` receipt.
+- Per worker: 10 minutes, one prompt, 40 Headroom requests, and fixed input/output ceilings.
+- Interrupt after five idle minutes, three repeated failures, or any budget breach.
 - Workers do not delegate, narrate progress, or write plans.
+- All workers launch through one guarded dispatcher; raw launch and prompt commands are outside the contract.
 
 Worker order:
 
@@ -66,16 +67,16 @@ The policy installer also injects a marked policy fragment into an existing Buzz
 
 Run `sh scripts/install-headroom.sh --check` to detect drift.
 
-## Supervise and audit
+## Dispatch and audit
 
 ```bash
-python3 skills/ops-herdr-orchestration/scripts/watch_worker.py \
-  --session biz --agent worker-name
+python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
+  --session biz --name useful-unit --cwd /path --brief-file brief.txt
 
 python3 skills/ops-herdr-orchestration/scripts/audit_session.py session.jsonl
 ```
 
-The watcher interrupts a worker at the wall/idle limit without closing its pane. The audit reports prompts, prompt characters, turns, tool calls, time, and token usage; it exits nonzero when defaults are exceeded.
+The dispatcher validates the five-line brief, selects OpenCode → Cline → Pi, refuses duplicate deliverables, owns one pane and prompt, and interrupts at wall, idle, Headroom request, or token ceilings. It closes its pane and returns one `accepted|blocked` receipt. The audit adds transcript-level prompt and tool-call enforcement when JSONL is available.
 
 ## Safety
 
