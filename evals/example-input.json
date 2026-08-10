@@ -1,0 +1,31 @@
+{
+  "headroom_version": "replace-with-tested-version",
+  "route": "opencode",
+  "concurrency_survives_owner_exit": false,
+  "direct_bypass_after_proxy_stop": false,
+  "runs": [
+    {
+      "name": "replace-with-worthwhile-task",
+      "accept_command": "replace-with-real-command",
+      "config_sha256_before": "replace-with-hash",
+      "config_sha256_after": "replace-with-hash",
+      "token_source": "replace-with-provider-receipt",
+      "baseline": {
+        "accept_exit": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "wall_seconds": 0,
+        "worker_prompts": 1,
+        "retries": 0
+      },
+      "candidate": {
+        "accept_exit": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "wall_seconds": 0,
+        "worker_prompts": 1,
+        "retries": 0
+      }
+    }
+  ]
+}
