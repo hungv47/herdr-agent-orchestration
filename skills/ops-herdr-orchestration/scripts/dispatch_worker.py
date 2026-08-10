@@ -27,8 +27,11 @@ ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RECEIPT_RE = re.compile(r"(?im)^\s*(accepted|blocked)\s*:\s*(.+)$")
 PANE_ID_RE = re.compile(r"^(?:%\d+|[A-Za-z0-9][A-Za-z0-9_.:%-]{0,127})$")
 CAVEMAN_SENTINEL = "Respond terse like smart caveman"
+POLICY_REVISION = "Policy revision: ipse-orchestration/v9"
+POLICY_MIN_BYTES = 2_000
 CAVEMAN_RULE_PATH = Path(__file__).resolve().parents[1] / "references" / "caveman-activate.md"
 POLICY_SENTINELS = (
+    POLICY_REVISION,
     CAVEMAN_SENTINEL,
     "A blocked receipt ends the attempt",
     "dispatch_worker.py",
@@ -289,6 +292,8 @@ def verify_route_config(route: Route) -> None:
         return
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     missing = [sentinel for sentinel in POLICY_SENTINELS if sentinel not in text]
+    if len(text.encode("utf-8")) < POLICY_MIN_BYTES:
+        missing.append("complete policy body")
     if missing:
         raise RuntimeError(f"{route.name} policy is unavailable or stale: {path}")
 

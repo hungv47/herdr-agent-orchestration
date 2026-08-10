@@ -38,7 +38,8 @@ python3 -m unittest discover -s tests -v
 
 [[ $(wc -c <AGENTS.md) -lt 4000 ]] || fail 'AGENTS.md is verbose'
 for phrase in \
-  'Recommendation: DIY|orchestrate' 'Prefer DIY' 'Respond terse like smart caveman' \
+  'Recommendation: DIY|orchestrate' 'Prefer DIY' 'Policy revision: ipse-orchestration/v9' \
+  'Respond terse like smart caveman' \
   'DeepSeek V4 Flash' 'OpenCode' 'Cline' 'GPT-5.6 Luna Max' 'Pi CLI' \
   'Default to one worker' 'at most 1,200 characters' 'eight model iterations' \
   '20k visible output characters' 'A blocked receipt ends the attempt' \
@@ -68,11 +69,13 @@ printf 'alpha identity\n' >"$test_home/.hermes/profiles/alpha/SOUL.md"
 printf 'beta identity\n' >"$test_home/.hermes/profiles/beta/SOUL.md"
 printf 'model:\n  base_url: http://127.0.0.1:8787/v1\nplugins:\n  enabled:\n    - %s_retrieve\n' "$legacy" >"$test_home/.hermes/config.yaml"
 printf 'HERMES_CODEX_BASE_URL=http://127.0.0.1:8787/v1\nKEEP=1\n' >"$test_home/.hermes/.env"
-printf '{"plugin":["file:///tmp/%s/providers/opencode/_dist/entry.opencode.js","keep"]}\n' "$legacy" >"$test_home/.config/opencode/opencode.jsonc"
+printf '{\n  // preserve this comment\n  "plugin": [\n    "file:///tmp/%s/providers/opencode/_dist/entry.opencode.js",\n    "keep",\n  ],\n}\n' "$legacy" >"$test_home/.config/opencode/opencode.jsonc"
 printf '{"providers":{"openai-codex":{"baseUrl":"http://127.0.0.1:8787/v1","keep":true}}}\n' >"$test_home/.pi/agent/models.json"
 printf 'legacy\n' >"$test_home/.config/$legacy/ipse-herdr-version"
 printf '#!/bin/sh\nexit 0\n' >"$fake_bin/herdr"
+printf '#!/bin/sh\nexit 0\n' >"$fake_bin/$legacy"
 chmod +x "$fake_bin/herdr"
+chmod +x "$fake_bin/$legacy"
 HOME="$test_home" PATH="$fake_bin:/usr/bin:/bin" bash scripts/install.sh >/dev/null
 [[ ! -e "$test_home/.agents/AGENTS.md" ]] || fail 'preview wrote files'
 HOME="$test_home" PATH="$fake_bin:/usr/bin:/bin" bash scripts/install.sh --apply >/dev/null
@@ -103,6 +106,7 @@ need "$test_home/.hermes/profiles/alpha/SOUL.md" 'alpha identity'
 ! grep -Fq '127.0.0.1:8787' "$test_home/.hermes/config.yaml" "$test_home/.pi/agent/models.json" || fail 'legacy base URL survived migration'
 ! grep -Fqi "$legacy" "$test_home/.hermes/config.yaml" "$test_home/.config/opencode/opencode.jsonc" || fail 'legacy plugin survived migration'
 need "$test_home/.hermes/.env" 'KEEP=1'
+need "$test_home/.config/opencode/opencode.jsonc" '// preserve this comment'
 for target in \
   "$test_home/.agents/skills/ops-herdr-orchestration" \
   "$test_home/.pi/agent/skills/ops-herdr-orchestration" \
@@ -112,6 +116,36 @@ for target in \
   "$test_home/.hermes/profiles/beta/skills/ops-herdr-orchestration"; do
   [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid skill link: $target"
 done
+
+# Installing before Hermes exists still creates its future always-loaded policy.
+pre_hermes_home="$tmp/pre-hermes-home"
+mkdir -p "$pre_hermes_home"
+HOME="$pre_hermes_home" PATH="$fake_bin:/usr/bin:/bin" bash scripts/install.sh --apply >/dev/null
+need "$pre_hermes_home/.hermes/SOUL.md" '<!-- BEGIN IPSE BOUNDED ORCHESTRATION -->'
+need "$pre_hermes_home/.hermes/SOUL.md" 'Respond terse like smart caveman'
+
+# A failed legacy teardown must leave its marker and planned changes retryable.
+retry_home="$tmp/retry-home"
+retry_bin="$tmp/retry-bin"
+mkdir -p "$retry_home/.hermes" "$retry_home/.config/$legacy" "$retry_bin"
+printf 'base_url: http://127.0.0.1:8787/v1\n' >"$retry_home/.hermes/config.yaml"
+printf 'legacy\n' >"$retry_home/.config/$legacy/ipse-herdr-version"
+printf '#!/bin/sh\nexit 7\n' >"$retry_bin/$legacy"
+chmod +x "$retry_bin/$legacy"
+if HOME="$retry_home" PATH="$retry_bin:/usr/bin:/bin" python3 scripts/migrate-legacy-proxy.py >/dev/null 2>&1; then
+  fail 'failed legacy teardown unexpectedly succeeded'
+fi
+[[ -f "$retry_home/.config/$legacy/ipse-herdr-version" ]] || fail 'failed teardown lost retry marker'
+need "$retry_home/.hermes/config.yaml" '127.0.0.1:8787'
+
+atomic_home="$tmp/atomic-home"
+mkdir -p "$atomic_home/.hermes" "$atomic_home/.pi/agent"
+printf 'base_url: http://127.0.0.1:8787/v1\n' >"$atomic_home/.hermes/config.yaml"
+printf '{broken\n' >"$atomic_home/.pi/agent/models.json"
+if HOME="$atomic_home" PATH=/usr/bin:/bin python3 scripts/migrate-legacy-proxy.py >/dev/null 2>&1; then
+  fail 'invalid config unexpectedly migrated'
+fi
+need "$atomic_home/.hermes/config.yaml" '127.0.0.1:8787'
 
 privacy_pattern='hun'"gvio"'|/Us'"ers"'/|/ho'"me"'/[^[:space:]/]+|[[:alnum:]._%+-]+'"@"'[[:alnum:].-]+\.[[:alpha:]]{2,}'
 if grep -REin "$privacy_pattern" --include='*.md' --include='*.py' --include='*.sh' .; then
@@ -124,6 +158,21 @@ if "$installed"; then
     [[ -L "$target" && "$target" -ef "$repo_root/AGENTS.md" ]] || fail "invalid installed link: $target"
   done
   grep -Fq 'Respond terse like smart caveman' "$HOME/.codex/AGENTS.md" || fail 'Caveman policy drift'
+  for target in \
+    "$HOME/.agents/skills/ops-herdr-orchestration" \
+    "$HOME/.pi/agent/skills/ops-herdr-orchestration" \
+    "$HOME/.grok/skills/ops-herdr-orchestration"; do
+    [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid installed skill link: $target"
+  done
+  if [[ -d "$HOME/.hermes" ]]; then
+    target="$HOME/.hermes/skills/ops-herdr-orchestration"
+    [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid installed skill link: $target"
+    for profile in "$HOME/.hermes/profiles"/*; do
+      [[ -d "$profile" ]] || continue
+      target="$profile/skills/ops-herdr-orchestration"
+      [[ -L "$target" && "$target" -ef "$skill_root" ]] || fail "invalid installed skill link: $target"
+    done
+  fi
   if command -v hermes >/dev/null 2>&1; then
     for hermes_home in "$HOME/.hermes" "$HOME/.hermes/profiles"/*; do
       [[ -d "$hermes_home" ]] || continue

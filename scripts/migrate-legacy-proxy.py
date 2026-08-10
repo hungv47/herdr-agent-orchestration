@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,7 +34,12 @@ def write_atomic(path: Path, text: str) -> None:
             os.unlink(temporary)
 
 
-def update_text(path: Path, transform: Callable[[str], str], check: bool, changed: list[str]) -> None:
+def plan_text(
+    path: Path,
+    transform: Callable[[str], str],
+    updates: list[tuple[Path, str]],
+    changed: list[str],
+) -> None:
     if not path.is_file():
         return
     current = path.read_text(encoding="utf-8")
@@ -41,11 +47,15 @@ def update_text(path: Path, transform: Callable[[str], str], check: bool, change
     if desired == current:
         return
     changed.append(str(path))
-    if not check:
-        write_atomic(path, desired)
+    updates.append((path, desired))
 
 
-def update_json(path: Path, transform: Callable[[dict[str, Any]], None], check: bool, changed: list[str]) -> None:
+def plan_json(
+    path: Path,
+    transform: Callable[[dict[str, Any]], None],
+    updates: list[tuple[Path, str]],
+    changed: list[str],
+) -> None:
     if not path.is_file():
         return
     current = json.loads(path.read_text(encoding="utf-8"))
@@ -54,8 +64,129 @@ def update_json(path: Path, transform: Callable[[dict[str, Any]], None], check: 
     if desired == current:
         return
     changed.append(str(path))
-    if not check:
-        write_atomic(path, json.dumps(desired, indent=2) + "\n")
+    updates.append((path, json.dumps(desired, indent=2) + "\n"))
+
+
+def strip_jsonc(text: str) -> str:
+    """Remove JSONC comments/trailing commas for validation without rewriting the file."""
+    output = list(text)
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(output):
+        char = output[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            index += 1
+            continue
+        if char == "/" and index + 1 < len(output) and output[index + 1] == "/":
+            output[index] = output[index + 1] = " "
+            index += 2
+            while index < len(output) and output[index] not in "\r\n":
+                output[index] = " "
+                index += 1
+            continue
+        if char == "/" and index + 1 < len(output) and output[index + 1] == "*":
+            output[index] = output[index + 1] = " "
+            index += 2
+            while index + 1 < len(output) and not (output[index] == "*" and output[index + 1] == "/"):
+                if output[index] not in "\r\n":
+                    output[index] = " "
+                index += 1
+            if index + 1 < len(output):
+                output[index] = output[index + 1] = " "
+                index += 2
+            continue
+        index += 1
+
+    output = list("".join(output))
+    in_string = False
+    escaped = False
+    for index, char in enumerate(output):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == ",":
+            lookahead = index + 1
+            while lookahead < len(output) and output[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(output) and output[lookahead] in "]}":
+                output[index] = " "
+    return "".join(output)
+
+
+JSON_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+
+
+def next_significant(text: str, start: int) -> int:
+    index = start
+    while index < len(text):
+        if text[index].isspace():
+            index += 1
+        elif text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end < 0 else end + 2
+        else:
+            break
+    return index
+
+
+def clean_opencode_jsonc(text: str) -> str:
+    """Remove legacy plugin strings while preserving valid JSONC formatting/comments."""
+    data = json.loads(strip_jsonc(text))
+    if not isinstance(data, dict):
+        raise ValueError("OpenCode JSONC root must be an object")
+    plugins = data.get("plugin")
+    legacy_plugins = {
+        item
+        for item in plugins
+        if isinstance(item, str) and f"{LEGACY}/providers/opencode/" in item
+    } if isinstance(plugins, list) else set()
+    if not legacy_plugins:
+        return text
+
+    removals: list[tuple[int, int]] = []
+    for match in JSON_STRING_RE.finditer(text):
+        try:
+            value = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        if value not in legacy_plugins:
+            continue
+        end = match.end()
+        significant = next_significant(text, end)
+        if significant < len(text) and text[significant] == ",":
+            end = significant + 1
+        removals.append((match.start(), end))
+
+    desired = text
+    for start, end in reversed(removals):
+        desired = desired[:start] + desired[end:]
+    parsed = json.loads(strip_jsonc(desired))
+    expected = json.loads(json.dumps(data))
+    expected["plugin"] = [item for item in plugins if item not in legacy_plugins]
+    if parsed != expected:
+        raise ValueError("OpenCode JSONC legacy-plugin removal could not be verified")
+    return desired
 
 
 def clean_hermes_yaml(text: str) -> str:
@@ -69,12 +200,6 @@ def clean_hermes_yaml(text: str) -> str:
     }
     lines = [line for line in text.splitlines() if line.strip() not in legacy_lines]
     return "\n".join(lines) + ("\n" if lines else "")
-
-
-def clean_opencode(data: dict[str, Any]) -> None:
-    plugins = data.get("plugin")
-    if isinstance(plugins, list):
-        data["plugin"] = [item for item in plugins if f"{LEGACY}/providers/opencode/" not in str(item)]
 
 
 def clean_pi(data: dict[str, Any]) -> None:
@@ -128,26 +253,27 @@ def reverse_hermes_aux_patch(text: str) -> str:
 
 def migrate(check: bool) -> list[str]:
     changed: list[str] = []
+    updates: list[tuple[Path, str]] = []
     hermes = HOME / ".hermes"
     configs = [hermes / "config.yaml", *sorted((hermes / "profiles").glob("*/config.yaml"))]
     for path in configs:
-        update_text(path, clean_hermes_yaml, check, changed)
+        plan_text(path, clean_hermes_yaml, updates, changed)
     for path in [hermes / ".env", *sorted((hermes / "profiles").glob("*/.env"))]:
-        update_text(path, clean_env, check, changed)
+        plan_text(path, clean_env, updates, changed)
 
-    update_json(HOME / ".config/opencode/opencode.jsonc", clean_opencode, check, changed)
-    update_json(HOME / ".pi/agent/models.json", clean_pi, check, changed)
-    update_text(HOME / ".local/bin/hermes", clean_wrapper, check, changed)
-    update_text(
+    plan_text(HOME / ".config/opencode/opencode.jsonc", clean_opencode_jsonc, updates, changed)
+    plan_json(HOME / ".pi/agent/models.json", clean_pi, updates, changed)
+    plan_text(HOME / ".local/bin/hermes", clean_wrapper, updates, changed)
+    plan_text(
         HOME / ".hermes/hermes-agent/agent/credential_pool.py",
         reverse_hermes_primary_patch,
-        check,
+        updates,
         changed,
     )
-    update_text(
+    plan_text(
         HOME / ".hermes/hermes-agent/agent/auxiliary_client.py",
         reverse_hermes_aux_patch,
-        check,
+        updates,
         changed,
     )
     pi = shutil.which("pi")
@@ -156,31 +282,39 @@ def migrate(check: bool) -> list[str]:
             Path(pi).resolve().parent.parent
             / "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"
         )
-        update_text(pi_api, reverse_pi_patch, check, changed)
+        plan_text(pi_api, reverse_pi_patch, updates, changed)
 
     plugin = hermes / f"plugins/{LEGACY}_retrieve"
-    if plugin.is_symlink() and LEGACY in os.readlink(plugin):
+    remove_plugin = plugin.is_symlink() and LEGACY in os.readlink(plugin)
+    if remove_plugin:
         changed.append(str(plugin))
-        if not check:
-            plugin.unlink()
     state = HOME / f".config/{LEGACY}/ipse-herdr-version"
     if state.exists():
         changed.append(str(state))
-        if not check:
-            state.unlink()
-            try:
-                state.parent.rmdir()
-            except OSError:
-                pass
         executable = shutil.which(LEGACY)
-        if executable and not check:
+        if not check:
+            if not executable:
+                raise RuntimeError(f"legacy uninstall is required; retry marker preserved: {state}")
             subprocess.run(
                 [executable, "install", "remove", "--profile", "herdr"],
-                check=False,
+                check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=30,
             )
+    if check:
+        return changed
+
+    for path, desired in updates:
+        write_atomic(path, desired)
+    if remove_plugin:
+        plugin.unlink()
+    if state.exists():
+        state.unlink()
+        try:
+            state.parent.rmdir()
+        except OSError:
+            pass
     return changed
 
 

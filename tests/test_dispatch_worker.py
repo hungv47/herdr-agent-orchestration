@@ -113,6 +113,18 @@ class DispatchWorkerTests(unittest.TestCase):
         self.assertIsNone(delta(first, "unrelated\nwindow\n"))
         self.assertEqual(delta(first, ""), 0)
 
+    def test_retained_output_reaches_cap_even_for_repeated_one_character_lines(self) -> None:
+        line_count = self.watcher.retained_output_lines(20_000)
+        repeated = "x\n" * line_count
+        self.assertEqual(line_count, 20_001)
+        self.assertGreater(line_count, 400)
+        self.assertTrue(
+            self.watcher.output_limit_reached(
+                self.watcher.visible_output_delta("", repeated),
+                20_000,
+            )
+        )
+
     def test_status_reads_real_nested_herdr_payload(self) -> None:
         payload = {"result": {"agent": {"agent_status": "working"}, "type": "agent_info"}}
         self.assertEqual(self.watcher.parse_status(payload), "working")
@@ -194,7 +206,8 @@ class DispatchWorkerTests(unittest.TestCase):
     def test_route_config_is_verified_per_selected_client(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
-            policy = "\n".join(self.dispatch.POLICY_SENTINELS)
+            sentinel_only = "\n".join(self.dispatch.POLICY_SENTINELS)
+            policy = sentinel_only + "\n" + ("complete bounded policy rule\n" * 100)
             opencode = home / ".config/opencode/AGENTS.md"
             opencode.parent.mkdir(parents=True)
             opencode.write_text(policy, encoding="utf-8")
@@ -208,6 +221,13 @@ class DispatchWorkerTests(unittest.TestCase):
                 self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
                 self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
                 self.dispatch.verify_route_config(self.dispatch.build_route("pi"))
+                cline.write_text(sentinel_only, encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "policy is unavailable or stale"):
+                    self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
+                stale = policy.replace("ipse-orchestration/v9", "ipse-orchestration/v8")
+                cline.write_text(stale, encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "policy is unavailable or stale"):
+                    self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
                 cline.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
                 with self.assertRaisesRegex(RuntimeError, "policy is unavailable or stale"):
                     self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
