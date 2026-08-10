@@ -6,9 +6,18 @@ from __future__ import annotations
 import json
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 
 
 HERDR_TIMEOUT_SECONDS = 30
+
+
+@dataclass(frozen=True)
+class HeadroomRequest:
+    key: str
+    uncached_input_tokens: int
+    gross_input_tokens: int
+    output_tokens: int
 
 
 def herdr(session: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -48,7 +57,45 @@ def parse_headroom_totals(data: object, agent: str) -> tuple[int, int, int]:
     return (0, 0, 0)
 
 
+def _request_agent(entry: dict[str, object]) -> str:
+    tags = entry.get("tags")
+    if isinstance(tags, dict):
+        client = tags.get("client")
+        if isinstance(client, str):
+            return client
+    model = str(entry.get("model") or "").lower()
+    return "codex" if "gpt-" in model or "codex" in model else ""
+
+
+def parse_headroom_requests(data: object, agent: str) -> list[HeadroomRequest]:
+    """Return recent attributable requests with cache-aware input usage."""
+    if not isinstance(data, dict):
+        raise ValueError("invalid Headroom stats payload")
+    logs = data.get("request_logs")
+    if not isinstance(logs, list):
+        raise ValueError("Headroom request logs are unavailable")
+    requests: list[HeadroomRequest] = []
+    for entry in logs:
+        if not isinstance(entry, dict) or _request_agent(entry) != agent:
+            continue
+        request_id = str(entry.get("request_id") or "")
+        timestamp = str(entry.get("timestamp") or "")
+        if not request_id or not timestamp:
+            continue
+        gross = int(entry.get("input_tokens_optimized") or 0)
+        uncached_value = entry.get("uncached_input_tokens")
+        uncached = gross if uncached_value is None else int(uncached_value or 0)
+        output = int(entry.get("output_tokens") or 0)
+        key = "|".join((request_id, timestamp, str(gross), str(output)))
+        requests.append(HeadroomRequest(key, uncached, gross, output))
+    return requests
+
+
+def headroom_requests(agent: str) -> list[HeadroomRequest]:
+    with urllib.request.urlopen("http://127.0.0.1:8787/stats", timeout=3) as response:
+        return parse_headroom_requests(json.load(response), agent)
+
+
 def headroom_totals(agent: str) -> tuple[int, int, int]:
     with urllib.request.urlopen("http://127.0.0.1:8787/stats", timeout=3) as response:
         return parse_headroom_totals(json.load(response), agent)
-

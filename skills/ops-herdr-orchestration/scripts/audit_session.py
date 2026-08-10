@@ -57,6 +57,7 @@ def audit(path: Path, args: argparse.Namespace) -> dict[str, object]:
         "tool_calls": sum(tools.values()),
         "tools": dict(tools.most_common()),
         "input_tokens": usage["input"],
+        "uncached_input_tokens": max(0, usage["input"] - usage["cacheRead"]),
         "output_tokens": usage["output"],
         "cache_read_tokens": usage["cacheRead"],
         "cost_usd": round(cost, 6),
@@ -66,7 +67,7 @@ def audit(path: Path, args: argparse.Namespace) -> dict[str, object]:
         "prompt_messages": args.max_prompts,
         "prompt_characters": args.max_prompt_chars,
         "tool_calls": args.max_tools,
-        "input_tokens": args.max_input_tokens,
+        "uncached_input_tokens": args.max_uncached_input_tokens,
         "output_tokens": args.max_output_tokens,
     }
     violations = [f"{name}={metrics[name]}>{limit}" for name, limit in limits.items() if metrics[name] > limit]
@@ -77,11 +78,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("transcript", type=Path)
     parser.add_argument("--max-seconds", type=int, default=600)
-    parser.add_argument("--max-prompts", type=int, default=2)
-    parser.add_argument("--max-prompt-chars", type=int, default=2400)
-    parser.add_argument("--max-tools", type=int, default=40)
-    parser.add_argument("--max-input-tokens", type=int, default=80000)
-    parser.add_argument("--max-output-tokens", type=int, default=20000)
+    parser.add_argument("--max-prompts", type=int, default=1)
+    parser.add_argument("--max-prompt-chars", type=int, default=1200)
+    parser.add_argument("--max-tools", type=int, default=16)
+    parser.add_argument("--max-uncached-input-tokens", type=int, default=80000)
+    parser.add_argument("--max-output-tokens", type=int, default=8000)
     args = parser.parse_args()
     result = audit(args.transcript, args)
     print(json.dumps(result, indent=2, sort_keys=True))

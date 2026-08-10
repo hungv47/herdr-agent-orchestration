@@ -10,7 +10,7 @@ import json
 import re
 import time
 
-from worker_runtime import headroom_totals, herdr
+from worker_runtime import headroom_requests, herdr
 
 
 def parse_status(data: object) -> str:
@@ -40,32 +40,27 @@ def screen_output(session: str, agent: str) -> str:
 def usage_limit_reason(
     deltas: dict[str, int],
     max_requests: int,
-    max_input_tokens: int,
+    max_uncached_input_tokens: int,
     max_output_tokens: int,
 ) -> str | None:
     if deltas["requests"] >= max_requests:
         return "request_limit"
-    if deltas["input_tokens"] >= max_input_tokens:
-        return "input_token_limit"
+    if deltas["uncached_input_tokens"] >= max_uncached_input_tokens:
+        return "uncached_input_token_limit"
     if deltas["output_tokens"] >= max_output_tokens:
         return "output_token_limit"
     return None
 
 
-def usage_deltas(
-    totals: tuple[int, int, int],
-    baselines: tuple[int, int, int],
-) -> tuple[dict[str, int] | None, str | None]:
-    if any(current < baseline for current, baseline in zip(totals, baselines)):
-        return None, "usage_counter_reset"
-    return (
-        {
-            "requests": totals[0] - baselines[0],
-            "input_tokens": totals[1] - baselines[1],
-            "output_tokens": totals[2] - baselines[2],
-        },
-        None,
-    )
+def add_new_requests(agent: str, seen: set[str], deltas: dict[str, int]) -> None:
+    for request in headroom_requests(agent):
+        if request.key in seen:
+            continue
+        seen.add(request.key)
+        deltas["requests"] += 1
+        deltas["uncached_input_tokens"] += request.uncached_input_tokens
+        deltas["gross_input_tokens"] += request.gross_input_tokens
+        deltas["output_tokens"] += request.output_tokens
 
 
 FAILURE_RE = re.compile(r"\b(error|failed|failure|exception|traceback|timed? out|not found|denied|unauthorized)\b", re.I)
@@ -97,16 +92,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", required=True, choices=("ipse", "biz", "work"))
     parser.add_argument("--agent", required=True)
-    parser.add_argument("--max-seconds", type=int, default=600)
-    parser.add_argument("--idle-seconds", type=int, default=300)
-    parser.add_argument("--poll-seconds", type=int, default=10)
-    parser.add_argument("--max-requests", type=int, default=40)
-    parser.add_argument("--max-input-tokens", type=int, default=80000)
-    parser.add_argument("--max-output-tokens", type=int, default=20000)
+    parser.add_argument("--max-seconds", type=int, default=480)
+    parser.add_argument("--idle-seconds", type=int, default=120)
+    parser.add_argument("--poll-seconds", type=int, default=2)
+    parser.add_argument("--max-requests", type=int, default=8)
+    parser.add_argument("--max-uncached-input-tokens", type=int, default=80000)
+    parser.add_argument("--max-output-tokens", type=int, default=8000)
     parser.add_argument("--headroom-agent", choices=("opencode", "codex"))
-    parser.add_argument("--baseline-requests", type=int, default=0)
-    parser.add_argument("--baseline-input-tokens", type=int, default=0)
-    parser.add_argument("--baseline-output-tokens", type=int, default=0)
+    parser.add_argument("--baseline-request-key", action="append", default=[])
     args = parser.parse_args()
     if not 1 <= args.max_seconds <= 1200:
         parser.error("--max-seconds must be 1..1200")
@@ -115,7 +108,13 @@ def main() -> int:
     last_change = started
     usage_failures = 0
     unknown_statuses = 0
-    deltas: dict[str, int] | None = None
+    deltas = {
+        "requests": 0,
+        "uncached_input_tokens": 0,
+        "gross_input_tokens": 0,
+        "output_tokens": 0,
+    }
+    seen = set(args.baseline_request_key)
     while True:
         current = status(args.session, args.agent)
         elapsed = int(time.monotonic() - started)
@@ -139,22 +138,16 @@ def main() -> int:
             reason = "status_unavailable"
         usage_checked = not args.headroom_agent
         if not reason and args.headroom_agent:
-            deltas = None
             try:
-                requests, input_tokens, output_tokens = headroom_totals(args.headroom_agent)
+                add_new_requests(args.headroom_agent, seen, deltas)
                 usage_failures = 0
                 usage_checked = True
-                deltas, reason = usage_deltas(
-                    (requests, input_tokens, output_tokens),
-                    (args.baseline_requests, args.baseline_input_tokens, args.baseline_output_tokens),
+                reason = usage_limit_reason(
+                    deltas,
+                    args.max_requests,
+                    args.max_uncached_input_tokens,
+                    args.max_output_tokens,
                 )
-                if deltas is not None:
-                    reason = usage_limit_reason(
-                        deltas,
-                        args.max_requests,
-                        args.max_input_tokens,
-                        args.max_output_tokens,
-                    )
             except (OSError, ValueError, json.JSONDecodeError):
                 usage_failures += 1
                 if usage_failures >= 3:

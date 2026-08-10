@@ -13,11 +13,12 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, NamedTuple
 
-from worker_runtime import headroom_totals, herdr as run
+from worker_runtime import headroom_requests, herdr as run
 
 
 BRIEF_LIMIT = 1_200
@@ -25,18 +26,18 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RECEIPT_RE = re.compile(r"(?im)^\s*(accepted|blocked)\s*:\s*(.+)$")
 DEFAULT_BUDGET = {
-    "max_seconds": 600,
-    "idle_seconds": 300,
-    "max_requests": 40,
-    "max_input_tokens": 80_000,
-    "max_output_tokens": 20_000,
+    "max_seconds": 480,
+    "idle_seconds": 120,
+    "max_requests": 8,
+    "max_uncached_input_tokens": 80_000,
+    "max_output_tokens": 8_000,
 }
 SUBSTANTIAL_BUDGET = {
-    "max_seconds": 1_200,
-    "idle_seconds": 300,
-    "max_requests": 80,
-    "max_input_tokens": 160_000,
-    "max_output_tokens": 40_000,
+    "max_seconds": 900,
+    "idle_seconds": 120,
+    "max_requests": 12,
+    "max_uncached_input_tokens": 140_000,
+    "max_output_tokens": 16_000,
 }
 
 
@@ -69,14 +70,10 @@ def parse_brief(brief: str) -> dict[str, str]:
     return parsed
 
 
-def choose_route(available: set[str], gpt_reason: str | None, gpt_model: str = "gpt-5.6-luna") -> Route:
-    if gpt_reason:
-        if "pi" not in available:
-            raise ValueError("GPT was requested but Pi is unavailable")
-        return Route("pi", ("--model", f"openai-codex/{gpt_model}:max"), "codex")
-    if "opencode" in available:
+def build_route(name: str, gpt_model: str = "gpt-5.6-luna") -> Route:
+    if name == "opencode":
         return Route("opencode", ("-m", "opencode/deepseek-v4-flash-free"), "opencode")
-    if "cline" in available:
+    if name == "cline":
         return Route(
             "cline",
             (
@@ -95,9 +92,33 @@ def choose_route(available: set[str], gpt_reason: str | None, gpt_model: str = "
             ),
             None,
         )
-    if "pi" in available:
-        return Route("pi", ("--model", "openai-codex/gpt-5.6-luna:max"), "codex")
-    raise ValueError("no approved worker route is available")
+    if name == "pi":
+        return Route("pi", ("--model", f"openai-codex/{gpt_model}:max"), "codex")
+    raise ValueError(f"unsupported route: {name}")
+
+
+def choose_route(
+    available: set[str],
+    gpt_reason: str | None,
+    gpt_model: str = "gpt-5.6-luna",
+    requested: str = "auto",
+) -> Route:
+    if requested != "auto":
+        if requested not in available:
+            raise ValueError(f"requested {requested} route is unavailable")
+        if requested == "pi" and not gpt_reason:
+            raise ValueError("Pi requires a GPT reason")
+        if requested != "pi" and gpt_reason:
+            raise ValueError("a GPT reason requires the Pi route")
+        return build_route(requested, gpt_model)
+    if gpt_reason:
+        if "pi" not in available:
+            raise ValueError("GPT was requested but Pi is unavailable")
+        return build_route("pi", gpt_model)
+    for name in ("opencode", "cline"):
+        if name in available:
+            return build_route(name, gpt_model)
+    raise ValueError("no approved free route is available; Pi requires a GPT reason")
 
 
 def parse_receipt(output: str) -> tuple[str, str]:
@@ -184,8 +205,56 @@ def deliverable_lock(deliverable: str) -> Iterator[str]:
         handle.close()
 
 
+@contextmanager
+def route_lock(route: str) -> Iterator[None]:
+    """Serialize each harness lane so Headroom usage stays attributable."""
+    path = safe_state_root() / f"route-{route}.lock"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    handle = os.fdopen(fd, "w+")
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"{route} route is already running a worker") from error
+        yield
+    finally:
+        handle.close()
+
+
 def available_routes() -> set[str]:
     return {name for name in ("opencode", "cline", "pi") if shutil.which(name)}
+
+
+def result_error_code(result: subprocess.CompletedProcess[str]) -> str | None:
+    stream = result.stdout or result.stderr
+    try:
+        return json.loads(stream).get("error", {}).get("code")
+    except (AttributeError, json.JSONDecodeError):
+        return None
+
+
+def start_worker(session: str, name: str, route: Route, pane_id: str) -> subprocess.CompletedProcess[str]:
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(5):
+        result = run(
+            session,
+            "agent",
+            "start",
+            name,
+            "--kind",
+            route.name,
+            "--pane",
+            pane_id,
+            "--timeout",
+            "20000",
+            "--",
+            *route.args,
+        )
+        if result.returncode == 0 or result_error_code(result) != "agent_pane_busy":
+            return result
+        time.sleep(0.25 * (attempt + 1))
+    assert result is not None
+    return result
 
 
 def health_gate() -> None:
@@ -201,7 +270,24 @@ def health_gate() -> None:
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError("Headroom health gate timed out after 30s") from error
-    require_ok(result, "Headroom health gate")
+    if result.returncode != 0 and "0 failure(s)" not in result.stdout:
+        require_ok(result, "Headroom health gate")
+
+
+def wait_for_shell(session: str, pane_id: str, *, timeout: float = 10, interval: float = 0.1) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = run(session, "pane", "process-info", "--pane", pane_id)
+        if result.returncode == 0:
+            try:
+                info = json.loads(result.stdout)["result"]["process_info"]
+                shell_pid = info["shell_pid"]
+                if any(process.get("pid") == shell_pid for process in info.get("foreground_processes", [])):
+                    return
+            except (KeyError, TypeError, json.JSONDecodeError):
+                pass
+        time.sleep(interval)
+    raise RuntimeError(f"pane {pane_id} did not reach an interactive shell prompt")
 
 
 def compact_result(status: str, **details: object) -> None:
@@ -214,6 +300,8 @@ def main() -> int:
     parser.add_argument("--name", required=True)
     parser.add_argument("--cwd", required=True, type=Path)
     parser.add_argument("--brief-file", required=True, type=Path)
+    parser.add_argument("--route", default="auto", choices=("auto", "opencode", "cline", "pi"))
+    parser.add_argument("--route-reason")
     parser.add_argument("--gpt-reason")
     parser.add_argument(
         "--gpt-model",
@@ -234,15 +322,20 @@ def main() -> int:
             raise ValueError("cwd must be a directory")
         brief = args.brief_file.read_text(encoding="utf-8").strip()
         fields = parse_brief(brief)
+        route_reason = normalize_reason("route reason", args.route_reason)
         gpt_reason = normalize_reason("gpt reason", args.gpt_reason)
         substantial_reason = normalize_reason("substantial reason", args.substantial_reason)
+        if args.route != "auto" and not route_reason:
+            raise ValueError("an explicit route requires --route-reason")
+        if args.route == "auto" and route_reason:
+            raise ValueError("--route-reason requires an explicit --route")
         if args.gpt_model != "gpt-5.6-luna" and not gpt_reason:
             raise ValueError("a stronger GPT model requires --gpt-reason")
-        route = choose_route(available_routes(), gpt_reason, args.gpt_model)
+        route = choose_route(available_routes(), gpt_reason, args.gpt_model, args.route)
         budget = SUBSTANTIAL_BUDGET if substantial_reason else DEFAULT_BUDGET
         deliverable = "\n".join(fields[key] for key in ("outcome", "write", "accept"))
 
-        with deliverable_lock(deliverable) as deliverable_id:
+        with deliverable_lock(deliverable) as deliverable_id, route_lock(route.name):
             if args.dry_run:
                 compact_result(
                     "accepted",
@@ -256,14 +349,15 @@ def main() -> int:
             duplicate = run(args.session, "agent", "get", args.name)
             if duplicate.returncode == 0:
                 raise RuntimeError(f"agent name already exists: {args.name}")
-            try:
-                duplicate_error = json.loads(duplicate.stdout).get("error", {}).get("code")
-            except (AttributeError, json.JSONDecodeError):
-                duplicate_error = None
+            duplicate_error = result_error_code(duplicate)
             if duplicate_error != "agent_not_found":
                 require_ok(duplicate, "duplicate-agent check")
             health_gate()
-            baseline = headroom_totals(route.headroom_agent) if route.headroom_agent else None
+            baseline_keys = (
+                [request.key for request in headroom_requests(route.headroom_agent)]
+                if route.headroom_agent
+                else []
+            )
             split_output = require_ok(
                 run(
                     args.session,
@@ -283,23 +377,8 @@ def main() -> int:
             pane_id = find_pane_id(json.loads(split_output))
             if not pane_id:
                 raise RuntimeError("pane creation returned no pane id")
-            require_ok(
-                run(
-                    args.session,
-                    "agent",
-                    "start",
-                    args.name,
-                    "--kind",
-                    route.name,
-                    "--pane",
-                    pane_id,
-                    "--timeout",
-                    "20000",
-                    "--",
-                    *route.args,
-                ),
-                "worker start",
-            )
+            wait_for_shell(args.session, pane_id)
+            require_ok(start_worker(args.session, args.name, route, pane_id), "worker start")
             started = True
             require_ok(run(args.session, "agent", "prompt", args.name, brief), "initial prompt")
 
@@ -317,24 +396,15 @@ def main() -> int:
                 str(budget["idle_seconds"]),
                 "--max-requests",
                 str(budget["max_requests"]),
-                "--max-input-tokens",
-                str(budget["max_input_tokens"]),
+                "--max-uncached-input-tokens",
+                str(budget["max_uncached_input_tokens"]),
                 "--max-output-tokens",
                 str(budget["max_output_tokens"]),
             ]
-            if route.headroom_agent and baseline is not None:
-                watcher_args.extend(
-                    (
-                        "--headroom-agent",
-                        route.headroom_agent,
-                        "--baseline-requests",
-                        str(baseline[0]),
-                        "--baseline-input-tokens",
-                        str(baseline[1]),
-                        "--baseline-output-tokens",
-                        str(baseline[2]),
-                    )
-                )
+            if route.headroom_agent:
+                watcher_args.extend(("--headroom-agent", route.headroom_agent))
+                for key in baseline_keys:
+                    watcher_args.extend(("--baseline-request-key", key))
             watched = subprocess.run(
                 watcher_args,
                 check=False,
@@ -370,4 +440,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

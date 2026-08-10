@@ -1,89 +1,114 @@
 ![One captain, any worker](assets/cover.png)
 
-# One captain, worthwhile workers
+# One captain, bounded workers
 
-A portable Herdr policy for short, verifiable, token-efficient agent sessions.
+A portable Herdr contract for using a strong user-facing captain with cheaper or free coding workers—without orchestration loops consuming more tokens than the work.
 
-The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise prompt, and hard time/request/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses captain traffic plus supported worker transports.
+## The contract
 
-## Runtime
+Before side effects, the captain recommends `DIY` or `orchestrate` and asks once unless the user already chose.
 
-```text
-User ↔ captain ↔ Headroom
-                 ├─ DIY: captain executes
-                 └─ Herdr: one bounded worker by default
-                    ├─ OpenCode → DeepSeek V4 Flash (free, preferred)
-                    ├─ Cline → DeepSeek V4 Flash (free fallback)
-                    └─ Pi → GPT-5.6 Luna (or justified stronger GPT)
-```
+- **DIY:** execute and verify directly. Prefer this for small, cohesive, or borderline work.
+- **Orchestrate:** the captain performs no task writes. It sends one whole deliverable through the guarded dispatcher, verifies once, and reports.
 
-OpenCode and Pi route through Headroom. Cline's hosted free provider does not expose a compatible local proxy route, so its fallback uses Cline's native agentic compaction, one retry, and a hard 600-second timeout.
+Orchestration must save more execution cost than dispatch, supervision, and verification add. One worker is the default; worker count is not progress.
 
-## Hard contract
+## Enforced budgets
 
-- DIY for small, cohesive, borderline, or read-mostly work.
-- Orchestrate only when its savings exceed dispatch and verification cost.
-- Default to one worker and one whole, independently verifiable deliverable.
-- Parallelize only independent, disjoint work with cheaper integration than serial work.
-- Briefs: maximum 1,200 characters; outcome, exact writes, non-goals, acceptance, and an exact `paths=; checks=; blocker=` receipt.
-- Per worker: 10 minutes, one prompt, 40 Headroom requests, and fixed input/output ceilings.
-- Interrupt after five idle minutes, three repeated failures, or any budget breach.
-- Workers do not delegate, narrate progress, or write plans.
-- All workers launch through one guarded dispatcher; raw launch and prompt commands are outside the contract.
+The policy is backed by executable limits:
 
-Worker order:
+| surface | default ceiling | substantial ceiling |
+|---|---:|---:|
+| Hermes captain | 8 model iterations per user turn | none |
+| worker wall time | 8 minutes | 15 minutes |
+| worker idle time | 2 minutes | 2 minutes |
+| worker model requests | 8 | 12 |
+| worker uncached input | 80k | 140k |
+| worker output | 8k | 16k |
+| worker prompts | 1 | 1 |
+
+Hermes automatic memory/skill-review forks are disabled. Headroom request logs separate uncached input from replayed cached context, so a large cached prefix is reported but not mistaken for new work.
+
+A blocked receipt ends the attempt. The captain does not repair infrastructure, re-prompt, replay, or silently fall back during that run.
+
+## Worker routes
 
 1. DeepSeek V4 Flash `xhigh` through OpenCode.
-2. DeepSeek V4 Flash `xhigh` through bounded Cline when OpenCode is unavailable.
-3. GPT-5.6 Luna `Max` through Pi when free routes are unavailable or GPT is justified.
+2. The same free model through bounded Cline when OpenCode is unavailable or a disjoint second free lane is justified.
+3. GPT-5.6 Luna `Max` through Pi only when the deliverable explicitly requires GPT.
 
-Use only Herdr sessions `ipse`, `biz`, and `work`.
+Each harness lane has a process lock. Parallel workers may use separate lanes only when their dependencies, writable paths, semantic surfaces, and runtime resources are disjoint.
+
+## Five-line bridge
+
+Every worker receives at most 1,200 characters:
+
+```text
+role=worker; outcome=<one finished result>
+write=<exact paths; everything else read-only>
+non-goals=<exclusions and external-action limits>
+accept=<commands or observable checks>
+return=accepted|blocked: paths=<paths>; checks=<checks>; blocker=<blocker>; then stop
+```
+
+Workers do not delegate, narrate progress, write plans, or perform discovery the captain can do read-only.
+
+## Guarded dispatch
+
+```bash
+python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
+  --session biz \
+  --name useful-unit \
+  --cwd /path/to/repo \
+  --brief-file /tmp/brief.txt
+```
+
+For explicit GPT work:
+
+```bash
+python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
+  --session biz --name hard-unit --cwd /path/to/repo --brief-file /tmp/brief.txt \
+  --gpt-reason 'requires stronger repository-wide reasoning'
+```
+
+For a disjoint Cline lane:
+
+```bash
+python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
+  --session biz --name independent-unit --cwd /path/to/repo --brief-file /tmp/brief.txt \
+  --route cline --route-reason 'disjoint paths and checks'
+```
+
+The dispatcher owns pane creation, one prompt, supervision, receipt parsing, and cleanup. Raw worker start or prompt commands are outside the contract.
 
 ## Install
 
-Prerequisites: Bash, Python 3, `uv`, Herdr, Hermes, OpenCode, Cline, and Pi.
+Prerequisites: Bash, Python 3, Herdr, Headroom, and at least one approved worker CLI.
 
 ```bash
-# Preview policy links, then apply.
-bash scripts/install.sh
-bash scripts/install.sh --apply
-
-# Install Headroom 0.34.0 and route Hermes/Pi/OpenCode.
-sh scripts/install-headroom.sh
-
+bash scripts/install.sh                    # preview
+bash scripts/install.sh --apply            # policies, skill, Hermes ceilings
 bash scripts/verify.sh
 bash scripts/verify.sh --installed
 ```
 
-The policy installer also injects a marked policy fragment into an existing Buzz Nest file without replacing Buzz-managed content. The Headroom installer:
+The installer links the shared policy and skill into supported agent homes. When Hermes is installed, it sets `agent.max_turns=8`, `memory.nudge_interval=0`, `skills.creation_nudge_interval=0`, and `code_execution.max_tool_calls=12`.
 
-- runs a loopback-only persistent proxy with telemetry off;
-- enables code-aware compression and output shaping;
-- routes Pi GPT and Hermes through the proxy;
-- installs Headroom's packaged OpenCode transport plugin;
-- installs the Hermes retrieval tool;
-- reduces Hermes prompt/tool noise and enables loop hard stops; and
-- preserves one pre-Headroom backup of changed configuration.
+## Audits
 
-Run `sh scripts/install-headroom.sh --check` to detect drift.
-
-## Dispatch and audit
+Audits are diagnostic, not a dispatch ceremony:
 
 ```bash
-python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
-  --session biz --name useful-unit --cwd /path --brief-file brief.txt
-
-python3 skills/ops-herdr-orchestration/scripts/audit_session.py session.jsonl
+python3 skills/ops-herdr-orchestration/scripts/audit_session.py worker.jsonl
+python3 skills/ops-herdr-orchestration/scripts/audit_hermes_session.py \
+  ~/.hermes/logs/agent.log --session SESSION_ID --orchestrated
 ```
 
-The dispatcher validates the five-line brief, selects OpenCode → Cline → Pi, refuses duplicate deliverables, owns one pane and prompt, and interrupts at wall, idle, Headroom request, or token ceilings. It closes its pane and returns one `accepted|blocked` receipt. The audit adds transcript-level prompt and tool-call enforcement when JSONL is available.
-
-## Safety
-
-Exact writable paths are mandatory. Everything else is read-only. Workers cannot delegate. External, destructive, irreversible, or security-sensitive actions still require explicit authority. Preserve unrelated user work and keep private content out of public surfaces.
+Both exit nonzero on waste. Repository verification includes regression coverage for cached-token accounting, lane isolation, one-prompt bridges, captain loops, and captain writes.
 
 ## Official links
 
-- [Headroom](https://github.com/headroomlabs-ai/headroom)
 - [Herdr](https://github.com/herdrdev/herdr)
+- [Headroom](https://github.com/headroomlabs-ai/headroom)
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+- [Pi](https://github.com/earendil-works/pi)
