@@ -20,14 +20,14 @@ The policy is backed by executable limits:
 | surface | default ceiling | substantial ceiling |
 |---|---:|---:|
 | Hermes captain | 8 model iterations per user turn | none |
-| worker wall time | 8 minutes | 15 minutes |
-| worker idle time | 2 minutes | 2 minutes |
-| worker model requests | 8 | 12 |
-| worker uncached input | 80k | 140k |
-| worker output | 8k | 16k |
+| worker wall time | 5 minutes | 10 minutes |
+| worker idle time | 90 seconds | 2 minutes |
+| worker model requests | 5 | 8 |
+| worker uncached input | 50k | 90k |
+| worker output | 5k | 10k |
 | worker prompts | 1 | 1 |
 
-Hermes automatic memory/skill-review forks are disabled. Headroom request logs separate uncached input from replayed cached context, so a large cached prefix is reported but not mistaken for new work.
+Hermes automatic memory/skill-review forks are disabled. The installer guards raw Herdr mutations and configures Headroom's shared $5 daily, 60k TPM, 10 RPM, and three-connection backstop. Request logs separate uncached input from replayed cached context, so a large cached prefix is reported but not mistaken for new work.
 
 A blocked receipt ends the attempt. The captain does not repair infrastructure, re-prompt, replay, or silently fall back during that run.
 
@@ -87,7 +87,8 @@ Prerequisites: Bash, Python 3, Herdr, Headroom, and at least one approved worker
 
 ```bash
 bash scripts/install.sh                    # preview
-bash scripts/install.sh --apply            # policies, skill, Hermes ceilings
+bash scripts/install.sh --apply            # policies, skill, Herdr guard, Hermes ceilings
+sh scripts/install-headroom.sh             # compression + shared spend/rate limits
 bash scripts/verify.sh
 bash scripts/verify.sh --installed
 ```

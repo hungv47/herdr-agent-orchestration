@@ -84,20 +84,20 @@ def idle_limit_reached(last_change: float, now: float, idle_seconds: int) -> boo
     return now - last_change >= idle_seconds
 
 
-def interrupt(session: str, agent: str) -> None:
-    herdr(session, "agent", "send-keys", agent, "ctrl+c")
+def interrupt(session: str, agent: str) -> bool:
+    return herdr(session, "agent", "send-keys", agent, "ctrl+c").returncode == 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", required=True, choices=("ipse", "biz", "work"))
     parser.add_argument("--agent", required=True)
-    parser.add_argument("--max-seconds", type=int, default=480)
-    parser.add_argument("--idle-seconds", type=int, default=120)
+    parser.add_argument("--max-seconds", type=int, default=300)
+    parser.add_argument("--idle-seconds", type=int, default=90)
     parser.add_argument("--poll-seconds", type=int, default=2)
-    parser.add_argument("--max-requests", type=int, default=8)
-    parser.add_argument("--max-uncached-input-tokens", type=int, default=80000)
-    parser.add_argument("--max-output-tokens", type=int, default=8000)
+    parser.add_argument("--max-requests", type=int, default=5)
+    parser.add_argument("--max-uncached-input-tokens", type=int, default=50000)
+    parser.add_argument("--max-output-tokens", type=int, default=5000)
     parser.add_argument("--headroom-agent", choices=("opencode", "codex"))
     parser.add_argument("--baseline-request-key", action="append", default=[])
     args = parser.parse_args()
@@ -163,8 +163,11 @@ def main() -> int:
             print(json.dumps({"agent": args.agent, "status": current, "elapsed_seconds": elapsed, "interrupted": False}))
             return 0
         if reason:
-            interrupt(args.session, args.agent)
+            interrupted = interrupt(args.session, args.agent)
             payload = {"agent": args.agent, "status": current, "elapsed_seconds": elapsed, "interrupted": True, "reason": reason}
+            payload["interrupt_confirmed"] = interrupted
+            if not interrupted:
+                payload["reason"] = f"{reason}+interrupt_failed"
             if args.headroom_agent:
                 payload["usage"] = deltas
             print(json.dumps(payload))

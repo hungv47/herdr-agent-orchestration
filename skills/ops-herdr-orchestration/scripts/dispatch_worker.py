@@ -25,19 +25,21 @@ BRIEF_LIMIT = 1_200
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RECEIPT_RE = re.compile(r"(?im)^\s*(accepted|blocked)\s*:\s*(.+)$")
+PANE_ID_RE = re.compile(r"^(?:%\d+|[A-Za-z0-9][A-Za-z0-9_.:%-]{0,127})$")
+PI_BASE_URL = "http://127.0.0.1:8787/v1"
 DEFAULT_BUDGET = {
-    "max_seconds": 480,
-    "idle_seconds": 120,
-    "max_requests": 8,
-    "max_uncached_input_tokens": 80_000,
-    "max_output_tokens": 8_000,
+    "max_seconds": 300,
+    "idle_seconds": 90,
+    "max_requests": 5,
+    "max_uncached_input_tokens": 50_000,
+    "max_output_tokens": 5_000,
 }
 SUBSTANTIAL_BUDGET = {
-    "max_seconds": 900,
+    "max_seconds": 600,
     "idle_seconds": 120,
-    "max_requests": 12,
-    "max_uncached_input_tokens": 140_000,
-    "max_output_tokens": 16_000,
+    "max_requests": 8,
+    "max_uncached_input_tokens": 90_000,
+    "max_output_tokens": 10_000,
 }
 
 
@@ -88,7 +90,7 @@ def build_route(name: str, gpt_model: str = "gpt-5.6-luna") -> Route:
                 "--retries",
                 "1",
                 "--timeout",
-                "600",
+                "300",
             ),
             None,
         )
@@ -249,6 +251,7 @@ def start_worker(session: str, name: str, route: Route, pane_id: str) -> subproc
             "20000",
             "--",
             *route.args,
+            timeout_seconds=25,
         )
         if result.returncode == 0 or result_error_code(result) != "agent_pane_busy":
             return result
@@ -257,7 +260,25 @@ def start_worker(session: str, name: str, route: Route, pane_id: str) -> subproc
     return result
 
 
-def health_gate() -> None:
+def verify_route_config(route: Route) -> None:
+    home = Path.home()
+    if route.name == "opencode":
+        path = home / ".config/opencode/opencode.jsonc"
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if "headroom/providers/opencode/_dist/entry.opencode.js" not in text:
+            raise RuntimeError(f"OpenCode is not routed through Headroom: {path}")
+    elif route.name == "pi":
+        path = home / ".pi/agent/models.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            base_url = data["providers"]["openai-codex"]["baseUrl"]
+        except (KeyError, OSError, TypeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Pi Headroom route is unreadable: {path}") from error
+        if base_url != PI_BASE_URL:
+            raise RuntimeError(f"Pi is not routed through Headroom: {path}")
+
+
+def health_gate(route: Route | None = None) -> None:
     if not shutil.which("headroom"):
         raise RuntimeError("Headroom is unavailable")
     try:
@@ -272,6 +293,31 @@ def health_gate() -> None:
         raise RuntimeError("Headroom health gate timed out after 30s") from error
     if result.returncode != 0 and "0 failure(s)" not in result.stdout:
         require_ok(result, "Headroom health gate")
+    if "no budget configured" in f"{result.stdout}\n{result.stderr}".lower():
+        raise RuntimeError("Headroom health gate has no spend budget")
+    if route:
+        verify_route_config(route)
+
+
+def pane_exists(session: str, pane_id: str) -> bool:
+    if not PANE_ID_RE.fullmatch(pane_id):
+        return True
+    result = run(session, "pane", "get", pane_id)
+    if result.returncode == 0:
+        return True
+    return result_error_code(result) != "pane_not_found"
+
+
+def cleanup_worker(session: str, name: str, pane_id: str, started: bool) -> str | None:
+    """Stop the child and verify its exact pane is gone."""
+    if started:
+        run(session, "agent", "send-keys", name, "ctrl+c")
+    for _ in range(2):
+        run(session, "pane", "close", pane_id)
+        if not pane_exists(session, pane_id):
+            return None
+        time.sleep(0.2)
+    return f"worker cleanup failed: pane {pane_id} is still present"
 
 
 def wait_for_shell(session: str, pane_id: str, *, timeout: float = 10, interval: float = 0.1) -> None:
@@ -352,7 +398,7 @@ def main() -> int:
             duplicate_error = result_error_code(duplicate)
             if duplicate_error != "agent_not_found":
                 require_ok(duplicate, "duplicate-agent check")
-            health_gate()
+            health_gate(route)
             baseline_keys = (
                 [request.key for request in headroom_requests(route.headroom_agent)]
                 if route.headroom_agent
@@ -410,7 +456,7 @@ def main() -> int:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=budget["max_seconds"] + 60,
+                timeout=budget["max_seconds"] + 25,
             )
             screen = run(args.session, "agent", "read", args.name, "--source", "recent-unwrapped", "--lines", "120")
             receipt_status, evidence = parse_receipt(screen.stdout if screen.returncode == 0 else "")
@@ -420,6 +466,13 @@ def main() -> int:
             except (IndexError, json.JSONDecodeError):
                 watcher_data = {"reason": "invalid watcher receipt"}
             status = "accepted" if watched.returncode == 0 and receipt_status == "accepted" else "blocked"
+            cleanup_error = cleanup_worker(args.session, args.name, pane_id, started)
+            if cleanup_error:
+                status = "blocked"
+                evidence = cleanup_error
+            else:
+                pane_id = None
+                started = False
             compact_result(
                 status,
                 route=route.name,
@@ -429,13 +482,16 @@ def main() -> int:
             )
             return 0 if status == "accepted" else 2
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
-        if started:
-            run(args.session, "agent", "send-keys", args.name, "ctrl+c")
-        compact_result("blocked", reason=str(error))
+        cleanup_error = cleanup_worker(args.session, args.name, pane_id, started) if pane_id else None
+        if not cleanup_error:
+            pane_id = None
+            started = False
+        reason = str(error) if not cleanup_error else f"{error}; {cleanup_error}"
+        compact_result("blocked", reason=reason)
         return 2
     finally:
         if pane_id:
-            run(args.session, "pane", "close", pane_id)
+            cleanup_worker(args.session, args.name, pane_id, started)
 
 
 if __name__ == "__main__":
