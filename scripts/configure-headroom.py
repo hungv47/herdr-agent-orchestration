@@ -118,10 +118,12 @@ def configure_opencode(check: bool) -> bool:
 def configure_pi(check: bool) -> bool:
     agent_dir = HOME / ".pi/agent"
     executable = shutil.which("pi")
-    if not agent_dir.is_dir() or not executable:
+    if not executable:
         return True
     package_root = Path(executable).resolve().parent.parent
     api_path = package_root / "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"
+    if not api_path.is_file():
+        raise RuntimeError(f"unsupported Pi installation: expected file absent at {api_path}")
     old = '''    const normalized = raw.replace(/\\/+$/, "");
     if (normalized.endsWith("/codex/responses"))'''
     new = '''    const normalized = raw.replace(/\\/+$/, "");
@@ -137,6 +139,7 @@ def configure_pi(check: bool) -> bool:
         return package_current
     if check:
         return False
+    agent_dir.mkdir(parents=True, exist_ok=True)
     if path.exists() and not path.with_suffix(path.suffix + ".pre-headroom").exists():
         shutil.copy2(path, path.with_suffix(path.suffix + ".pre-headroom"))
     provider["baseUrl"] = BASE_URL
