@@ -1,0 +1,39 @@
+{
+  "headroom_version": "replace-with-tested-version",
+  "route": "opencode",
+  "concurrency_survives_owner_exit": false,
+  "concurrency_receipt_sha256": "replace-with-sha256",
+  "direct_bypass_after_proxy_stop": false,
+  "direct_bypass_receipt_sha256": "replace-with-sha256",
+  "runs": [
+    {
+      "name": "replace-with-worthwhile-task",
+      "model": "replace-with-model",
+      "starting_commit": "replace-with-git-commit",
+      "accept_command": "replace-with-real-command",
+      "accept_command_sha256": "replace-with-sha256",
+      "task_brief_sha256": "replace-with-sha256",
+      "config_sha256_before": "replace-with-sha256",
+      "config_sha256_after": "replace-with-sha256",
+      "token_source": "provider_receipt-or-harness_receipt",
+      "baseline": {
+        "accept_exit": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "wall_seconds": 0,
+        "worker_prompts": 1,
+        "retries": 0,
+        "token_receipt_sha256": "replace-with-sha256"
+      },
+      "candidate": {
+        "accept_exit": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "wall_seconds": 0,
+        "worker_prompts": 1,
+        "retries": 0,
+        "token_receipt_sha256": "replace-with-sha256"
+      }
+    }
+  ]
+}
