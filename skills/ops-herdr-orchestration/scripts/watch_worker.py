@@ -32,8 +32,22 @@ def status(session: str, agent: str) -> str:
         return "unknown"
 
 
-def screen_output(session: str, agent: str) -> str:
-    result = herdr(session, "agent", "read", agent, "--source", "recent-unwrapped", "--lines", "400")
+def retained_output_lines(max_output_chars: int) -> int:
+    """Retain enough one-character lines for the local character cap to fire."""
+    return max_output_chars + 1
+
+
+def screen_output(session: str, agent: str, lines: int) -> str:
+    result = herdr(
+        session,
+        "agent",
+        "read",
+        agent,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        str(lines),
+    )
     return result.stdout if result.returncode == 0 else ""
 
 
@@ -103,6 +117,7 @@ def main() -> int:
     unknown_statuses = 0
     previous_output = ""
     visible_output_chars = 0
+    output_lines = retained_output_lines(args.max_output_chars)
     while True:
         current = status(args.session, args.agent)
         elapsed = int(time.monotonic() - started)
@@ -110,7 +125,7 @@ def main() -> int:
             print(json.dumps({"agent": args.agent, "status": current, "elapsed_seconds": elapsed, "interrupted": False}))
             return 1
         unknown_statuses = unknown_statuses + 1 if current == "unknown" else 0
-        output = screen_output(args.session, args.agent)
+        output = screen_output(args.session, args.agent, output_lines)
         delta = visible_output_delta(previous_output, output)
         if output:
             previous_output = output

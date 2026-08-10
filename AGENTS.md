@@ -4,12 +4,14 @@
 
 Direct-open session = captain. Child session, `AGENT_ROLE=worker`, or `role=worker` brief = worker.
 
-Before side effects say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask once unless the user chose. Prefer DIY unless orchestration overhead clearly pays. The choice holds for the scope.
+Before side effects say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask once unless chosen. Prefer DIY; choice holds for scope.
 
 - **DIY:** execute and verify directly. Do not use Herdr.
 - **Orchestrate:** sole user contact; no task writes. Brief, supervise, verify read-only, report.
 
 ## Efficient orchestration
+
+Policy revision: ipse-orchestration/v9.
 
 Use Herdr session `ipse`, `biz`, or `work`. Keep providers direct: DeepSeek in OpenCode/Cline, GPT in Pi. Cline uses native compaction and its timeout.
 

@@ -65,15 +65,12 @@ if [[ -d "$HOME/.hermes/profiles" ]]; then
   done
 fi
 
-soul_targets=()
-if [[ -d "$HOME/.hermes" ]] || command -v hermes >/dev/null 2>&1; then
-  soul_targets+=("$HOME/.hermes/SOUL.md")
-  if [[ -d "$HOME/.hermes/profiles" ]]; then
-    for profile in "$HOME/.hermes/profiles"/*; do
-      [[ -d "$profile" ]] || continue
-      soul_targets+=("$profile/SOUL.md")
-    done
-  fi
+soul_targets=("$HOME/.hermes/SOUL.md")
+if [[ -d "$HOME/.hermes/profiles" ]]; then
+  for profile in "$HOME/.hermes/profiles"/*; do
+    [[ -d "$profile" ]] || continue
+    soul_targets+=("$profile/SOUL.md")
+  done
 fi
 
 preflight_target() {
