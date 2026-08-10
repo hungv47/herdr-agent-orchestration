@@ -28,7 +28,9 @@ required=(
   scripts/headroom/hermes/headroom_retrieve/plugin.yaml
   skills/ops-herdr-orchestration/SKILL.md
   skills/ops-herdr-orchestration/scripts/audit_session.py
+  skills/ops-herdr-orchestration/scripts/dispatch_worker.py
   skills/ops-herdr-orchestration/scripts/watch_worker.py
+  skills/ops-herdr-orchestration/scripts/worker_runtime.py
 )
 for file in "${required[@]}"; do [[ -f "$file" ]] || fail "missing $file"; done
 
@@ -36,20 +38,42 @@ for script in scripts/install.sh scripts/install-headroom.sh scripts/verify.sh; 
   [[ -x "$script" ]] || fail "not executable: $script"
   bash -n "$script"
 done
-for script in skills/ops-herdr-orchestration/scripts/audit_session.py skills/ops-herdr-orchestration/scripts/watch_worker.py; do
+for script in skills/ops-herdr-orchestration/scripts/audit_session.py skills/ops-herdr-orchestration/scripts/dispatch_worker.py skills/ops-herdr-orchestration/scripts/watch_worker.py; do
   [[ -x "$script" ]] || fail "not executable: $script"
 done
-python3 -m py_compile scripts/configure-headroom.py skills/ops-herdr-orchestration/scripts/audit_session.py skills/ops-herdr-orchestration/scripts/watch_worker.py
+python3 -m py_compile scripts/configure-headroom.py skills/ops-herdr-orchestration/scripts/audit_session.py skills/ops-herdr-orchestration/scripts/dispatch_worker.py skills/ops-herdr-orchestration/scripts/watch_worker.py skills/ops-herdr-orchestration/scripts/worker_runtime.py
+PYTHONPATH="$skill/scripts" python3 - <<'PY'
+from dispatch_worker import parse_brief, parse_receipt
+from worker_runtime import parse_headroom_totals
+
+brief = "\n".join((
+    "role=worker; outcome=one verified result",
+    "write=none",
+    "non-goals=no writes; no delegation",
+    "accept=receipt parser passes",
+    "return=accepted|blocked: paths=<paths>; checks=<checks>; blocker=<blocker>; then stop",
+))
+parse_brief(brief)
+assert parse_receipt("accepted: paths=none; checks=ok; blocker=none")[0] == "accepted"
+assert parse_receipt("accepted: looks good")[0] == "blocked"
+stats = {"agent_usage": {"agents": [{"agent": "opencode", "requests": 40, "after_tokens": 80000, "output_tokens": 20000}]}}
+assert parse_headroom_totals(stats, "opencode") == (40, 80000, 20000)
+PY
 
 for file in AGENTS.md README.md skills/ops-herdr-orchestration/SKILL.md; do
-  for phrase in 'Headroom' 'DeepSeek V4 Flash' 'GPT-5.6 Luna' 'Default to one worker' '1,200 characters' '10 minutes' '40 tool calls' 'one corrective prompt' 'five minutes'; do
+  for phrase in 'Headroom' 'DeepSeek V4 Flash' 'Cline' 'GPT-5.6 Luna' 'Pi' 'Default to one worker' '1,200 characters' '10 minutes' 'one prompt' 'dispatch_worker.py'; do
     need "$file" "$phrase"
   done
 done
-for stale in 'eval_run.py' 'efficiency preflight' 'cli: Pi CLI' 'OpenCode or Cline CLI' 'run both workers'; do
+for file in AGENTS.md README.md; do need "$file" '40 Headroom requests'; need "$file" 'five idle minutes'; done
+need skills/ops-herdr-orchestration/SKILL.md '40 Headroom requests'
+need skills/ops-herdr-orchestration/SKILL.md 'request or token ceilings'
+for stale in 'eval_run.py' 'efficiency preflight' 'Codex CLI' 'run both workers'; do
   ! grep -Fqi "$stale" AGENTS.md README.md skills/ops-herdr-orchestration/SKILL.md ||
     fail "retired ceremony remains: $stale"
 done
+need scripts/configure-headroom.py 'def configure_pi'
+need scripts/configure-headroom.py '"openai-codex"'
 
 # One synthetic over-budget transcript proves the audit fails closed.
 cat >"$tmp/waste.jsonl" <<'JSON'
@@ -83,7 +107,9 @@ public_text=(
   scripts/headroom/hermes/headroom_retrieve/__init__.py
   skills/ops-herdr-orchestration/SKILL.md
   skills/ops-herdr-orchestration/scripts/audit_session.py
+  skills/ops-herdr-orchestration/scripts/dispatch_worker.py
   skills/ops-herdr-orchestration/scripts/watch_worker.py
+  skills/ops-herdr-orchestration/scripts/worker_runtime.py
 )
 for file in "${public_text[@]}"; do
   ! grep -Ein "$privacy_pattern" "$file" || fail "privacy scan failed: $file"

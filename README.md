@@ -4,7 +4,7 @@
 
 A portable Herdr policy for short, verifiable, token-efficient agent sessions.
 
-The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise brief, one correction at most, and hard time/tool/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses both captain and worker model traffic.
+The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise prompt, and hard time/request/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses captain traffic plus supported worker transports.
 
 ## Runtime
 
@@ -12,11 +12,12 @@ The default is simple: DIY small work. When orchestration earns its overhead, us
 User ↔ captain ↔ Headroom
                  ├─ DIY: captain executes
                  └─ Herdr: one bounded worker by default
-                    ├─ OpenCode → DeepSeek V4 Flash
-                    └─ Codex fallback → GPT-5.6 Luna
+                    ├─ OpenCode → DeepSeek V4 Flash (free, preferred)
+                    ├─ Cline → DeepSeek V4 Flash (free fallback)
+                    └─ Pi → GPT-5.6 Luna (or justified stronger GPT)
 ```
 
-Pi and Cline are intentionally outside the worker pool: the supported Headroom paths here are OpenCode, Codex, and Hermes.
+OpenCode and Pi route through Headroom. Cline's hosted free provider does not expose a compatible local proxy route, so its fallback uses Cline's native agentic compaction, one retry, and a hard 600-second timeout.
 
 ## Hard contract
 
@@ -24,28 +25,30 @@ Pi and Cline are intentionally outside the worker pool: the supported Headroom p
 - Orchestrate only when its savings exceed dispatch and verification cost.
 - Default to one worker and one whole, independently verifiable deliverable.
 - Parallelize only independent, disjoint work with cheaper integration than serial work.
-- Briefs: maximum 1,200 characters; outcome, exact writes, non-goals, acceptance, return-and-stop.
-- Per worker: 10 minutes, 40 tool calls, one corrective prompt, and a token ceiling when available.
-- Interrupt after five minutes idle, three repeated failures, or any budget breach.
+- Briefs: maximum 1,200 characters; outcome, exact writes, non-goals, acceptance, and an exact `paths=; checks=; blocker=` receipt.
+- Per worker: 10 minutes, one prompt, 40 Headroom requests, and fixed input/output ceilings.
+- Interrupt after five idle minutes, three repeated failures, or any budget breach.
 - Workers do not delegate, narrate progress, or write plans.
+- All workers launch through one guarded dispatcher; raw launch and prompt commands are outside the contract.
 
 Worker order:
 
 1. DeepSeek V4 Flash `xhigh` through OpenCode.
-2. GPT-5.6 Luna `Max` through Codex.
+2. DeepSeek V4 Flash `xhigh` through bounded Cline when OpenCode is unavailable.
+3. GPT-5.6 Luna `Max` through Pi when free routes are unavailable or GPT is justified.
 
 Use only Herdr sessions `ipse`, `biz`, and `work`.
 
 ## Install
 
-Prerequisites: Bash, Python 3, `uv`, Herdr, Hermes, Codex, and OpenCode.
+Prerequisites: Bash, Python 3, `uv`, Herdr, Hermes, OpenCode, Cline, and Pi.
 
 ```bash
 # Preview policy links, then apply.
 bash scripts/install.sh
 bash scripts/install.sh --apply
 
-# Install Headroom 0.34.0 and route Hermes/Codex/OpenCode.
+# Install Headroom 0.34.0 and route Hermes/Pi/OpenCode.
 sh scripts/install-headroom.sh
 
 bash scripts/verify.sh
@@ -56,7 +59,7 @@ The policy installer also injects a marked policy fragment into an existing Buzz
 
 - runs a loopback-only persistent proxy with telemetry off;
 - enables code-aware compression and output shaping;
-- routes Codex and Hermes through the proxy;
+- routes Pi GPT and Hermes through the proxy;
 - installs Headroom's packaged OpenCode transport plugin;
 - installs the Hermes retrieval tool;
 - reduces Hermes prompt/tool noise and enables loop hard stops; and
@@ -64,16 +67,16 @@ The policy installer also injects a marked policy fragment into an existing Buzz
 
 Run `sh scripts/install-headroom.sh --check` to detect drift.
 
-## Supervise and audit
+## Dispatch and audit
 
 ```bash
-python3 skills/ops-herdr-orchestration/scripts/watch_worker.py \
-  --session biz --agent worker-name
+python3 skills/ops-herdr-orchestration/scripts/dispatch_worker.py \
+  --session biz --name useful-unit --cwd /path --brief-file brief.txt
 
 python3 skills/ops-herdr-orchestration/scripts/audit_session.py session.jsonl
 ```
 
-The watcher interrupts a worker at the wall/idle limit without closing its pane. The audit reports prompts, prompt characters, turns, tool calls, time, and token usage; it exits nonzero when defaults are exceeded.
+The dispatcher validates the five-line brief, selects OpenCode → Cline → Pi, refuses duplicate deliverables, owns one pane and prompt, and interrupts at wall, idle, Headroom request, or token ceilings. It closes its pane and returns one `accepted|blocked` receipt. The audit adds transcript-level prompt and tool-call enforcement when JSONL is available.
 
 ## Safety
 
