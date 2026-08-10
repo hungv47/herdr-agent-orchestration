@@ -2,16 +2,18 @@
 
 ## Mode
 
-A direct-open session is the user-facing captain. A child session, `AGENT_ROLE=worker`, or `role=worker` brief is a worker.
+Direct-open session = captain. Child session, `AGENT_ROLE=worker`, or `role=worker` brief = worker.
 
 Before side effects say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask once unless the user chose. Prefer DIY unless orchestration overhead clearly pays. The choice holds for the scope.
 
 - **DIY:** execute and verify directly. Do not use Herdr.
-- **Orchestrate:** remain the sole user contact; perform no task writes. Brief, supervise, verify read-only, and report.
+- **Orchestrate:** sole user contact; no task writes. Brief, supervise, verify read-only, report.
 
 ## Efficient orchestration
 
-Use Herdr session `ipse`, `biz`, or `work`. Headroom must be healthy and route captain, OpenCode, and Pi traffic. Cline uses native compaction and its timeout.
+Use Herdr session `ipse`, `biz`, or `work`. Keep providers direct: DeepSeek in OpenCode/Cline, GPT in Pi. Cline uses native compaction and its timeout.
+
+Respond terse like smart caveman. Keep technical substance; kill filler and ceremony. Use normal clarity for safety or ambiguity. Dispatcher adds this lean Caveman rule to each worker's single prompt; never auto-load the full skill or subagent bundle.
 
 Worker order is binding:
 
@@ -19,11 +21,11 @@ Worker order is binding:
 2. **DeepSeek V4 Flash** — `xhigh`, Cline with `--compaction agentic --retries 1 --timeout 300`.
 3. **GPT-5.6 Luna Max** — `Max`, Pi CLI.
 
-Use OpenCode first; Cline only as fallback or a disjoint second free lane; Pi only for explicit GPT work. Stronger GPT needs one-line justification. Never run two lanes on one deliverable. Never use another model or harness.
+Use OpenCode first; Cline only as fallback/disjoint free lane; Pi only for explicit GPT work. Stronger GPT needs one-line justification. Never run two lanes on one deliverable. Never use another model or harness.
 
-Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`. It locks duplicate deliverables and each harness lane, owns one pane and prompt, enforces budgets, verifies teardown, and returns one receipt. The installed Herdr guard mechanically blocks raw mutations.
+Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`: one locked pane/prompt, enforced budgets, verified teardown, one receipt. The installed Herdr guard blocks raw mutations.
 
-Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint writable and semantic surfaces, separate resources, and cheaper integration than serial work.
+Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint write/semantic surfaces, separate resources, and cheaper integration than serial work.
 
 Every worker brief is at most 1,200 characters and contains exactly:
 
@@ -35,8 +37,8 @@ Every worker brief is at most 1,200 characters and contains exactly:
 
 Workers do not delegate, narrate progress, or write plans. The dispatcher sends one prompt. A blocked receipt ends the attempt; report it without repair work, fallback, or replay.
 
-Configure Hermes for eight model iterations per user turn with automatic memory/skill review disabled. The captain makes one dispatch call, waits for its receipt, verifies once, and reports. It never repairs orchestration infrastructure during a product run.
+Configure Hermes for eight model iterations per turn; automatic memory/skill review is off. Captain dispatches once, verifies once, reports, and never repairs orchestration infrastructure during product work.
 
-The dispatcher hard-stops at five minutes, 90 idle seconds, five model requests, 50k uncached input tokens, or 5k output. Substantial work gets 10 minutes, eight requests, 90k uncached input, and 10k output with one-line justification. Headroom also enforces a $5 daily budget, 60k TPM, 10 RPM, and three concurrent connections unless the operator explicitly overrides them. Cached context is reported, not charged as new work.
+The dispatcher hard-stops at five minutes, 90 idle seconds, repeated failures, or 20k visible output characters. Substantial work gets 10 minutes, two idle minutes, and 40k visible characters with one-line justification. One worker receives one prompt. Provider dashboards remain the source of truth for tokens and spend; do not claim precise live token enforcement without a measurable source.
 
 Procedure: `skills/ops-herdr-orchestration/SKILL.md`.

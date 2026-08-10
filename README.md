@@ -22,12 +22,12 @@ The policy is backed by executable limits:
 | Hermes captain | 8 model iterations per user turn | none |
 | worker wall time | 5 minutes | 10 minutes |
 | worker idle time | 90 seconds | 2 minutes |
-| worker model requests | 5 | 8 |
-| worker uncached input | 50k | 90k |
-| worker output | 5k | 10k |
+| visible worker output | 20k characters | 40k characters |
 | worker prompts | 1 | 1 |
 
-Hermes automatic memory/skill-review forks are disabled. The installer guards raw Herdr mutations and configures Headroom's shared $5 daily, 60k TPM, 10 RPM, and three-connection backstop. Request logs separate uncached input from replayed cached context, so a large cached prefix is reported but not mistaken for new work.
+Hermes automatic memory/skill-review forks are disabled. The installer guards raw Herdr mutations. Wall, idle, repeated-error, visible-output, and one-prompt limits remain locally enforceable; provider dashboards remain the honest source for token and spend totals.
+
+Captain and worker replies use Caveman's 615-byte activation rule. The full skill and bundled subagent suite are intentionally excluded because Caveman's own guidance says their larger prompt overhead can be net-negative on already-terse agentic work.
 
 A blocked receipt ends the attempt. The captain does not repair infrastructure, re-prompt, replay, or silently fall back during that run.
 
@@ -83,12 +83,11 @@ The dispatcher owns pane creation, one prompt, supervision, receipt parsing, and
 
 ## Install
 
-Prerequisites: Bash, Python 3, Herdr, Headroom, and at least one approved worker CLI.
+Prerequisites: Bash, Python 3, Herdr, and at least one approved worker CLI.
 
 ```bash
 bash scripts/install.sh                    # preview
 bash scripts/install.sh --apply            # policies, skill, Herdr guard, Hermes ceilings
-sh scripts/install-headroom.sh             # compression + shared spend/rate limits
 bash scripts/verify.sh
 bash scripts/verify.sh --installed
 ```
@@ -105,11 +104,11 @@ python3 skills/ops-herdr-orchestration/scripts/audit_hermes_session.py \
   ~/.hermes/logs/agent.log --session SESSION_ID --orchestrated
 ```
 
-Both exit nonzero on waste. Repository verification includes regression coverage for cached-token accounting, lane isolation, one-prompt bridges, captain loops, and captain writes.
+Both exit nonzero on waste. Repository verification includes regression coverage for lane isolation, one-prompt Caveman bridges, captain loops, and captain writes.
 
 ## Official links
 
 - [Herdr](https://github.com/herdrdev/herdr)
-- [Headroom](https://github.com/headroomlabs-ai/headroom)
+- [Caveman](https://github.com/JuliusBrussee/caveman)
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 - [Pi](https://github.com/earendil-works/pi)

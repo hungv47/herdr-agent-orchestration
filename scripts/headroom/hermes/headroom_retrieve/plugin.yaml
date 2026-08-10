@@ -1,6 +1,0 @@
-name: headroom_retrieve
-version: 1.0.0
-description: "Retrieve content compressed by Headroom"
-author: headroomlabs-ai
-provides_tools:
-  - headroom_retrieve

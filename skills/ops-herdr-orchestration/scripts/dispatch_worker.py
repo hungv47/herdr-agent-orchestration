@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, NamedTuple
 
-from worker_runtime import headroom_requests, herdr as run
+from worker_runtime import herdr as run
 
 
 BRIEF_LIMIT = 1_200
@@ -26,27 +26,23 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RECEIPT_RE = re.compile(r"(?im)^\s*(accepted|blocked)\s*:\s*(.+)$")
 PANE_ID_RE = re.compile(r"^(?:%\d+|[A-Za-z0-9][A-Za-z0-9_.:%-]{0,127})$")
-PI_BASE_URL = "http://127.0.0.1:8787/v1"
+CAVEMAN_SENTINEL = "Respond terse like smart caveman"
+CAVEMAN_RULE_PATH = Path(__file__).resolve().parents[1] / "references" / "caveman-activate.md"
 DEFAULT_BUDGET = {
     "max_seconds": 300,
     "idle_seconds": 90,
-    "max_requests": 5,
-    "max_uncached_input_tokens": 50_000,
-    "max_output_tokens": 5_000,
+    "max_output_chars": 20_000,
 }
 SUBSTANTIAL_BUDGET = {
     "max_seconds": 600,
     "idle_seconds": 120,
-    "max_requests": 8,
-    "max_uncached_input_tokens": 90_000,
-    "max_output_tokens": 10_000,
+    "max_output_chars": 40_000,
 }
 
 
 class Route(NamedTuple):
     name: str
     args: tuple[str, ...]
-    headroom_agent: str | None
 
 
 def parse_brief(brief: str) -> dict[str, str]:
@@ -74,7 +70,7 @@ def parse_brief(brief: str) -> dict[str, str]:
 
 def build_route(name: str, gpt_model: str = "gpt-5.6-luna") -> Route:
     if name == "opencode":
-        return Route("opencode", ("-m", "opencode/deepseek-v4-flash-free"), "opencode")
+        return Route("opencode", ("-m", "opencode/deepseek-v4-flash-free"))
     if name == "cline":
         return Route(
             "cline",
@@ -92,10 +88,9 @@ def build_route(name: str, gpt_model: str = "gpt-5.6-luna") -> Route:
                 "--timeout",
                 "300",
             ),
-            None,
         )
     if name == "pi":
-        return Route("pi", ("--model", f"openai-codex/{gpt_model}:max"), "codex")
+        return Route("pi", ("--model", f"openai-codex/{gpt_model}:max"))
     raise ValueError(f"unsupported route: {name}")
 
 
@@ -138,6 +133,16 @@ def parse_receipt(output: str) -> tuple[str, str]:
         return "blocked", "incomplete worker receipt; require paths=, checks=, blocker="
     evidence = "; ".join(f"{key}={fields[key]}" for key in ("paths", "checks", "blocker"))
     return match.group(1).lower(), evidence[:600]
+
+
+def caveman_worker_prompt(brief: str) -> str:
+    """Add Caveman to the existing fifth line; never add a prompt or ceremony."""
+    rule = " ".join(CAVEMAN_RULE_PATH.read_text(encoding="utf-8").split())
+    if CAVEMAN_SENTINEL not in rule:
+        raise RuntimeError(f"Caveman rule is invalid: {CAVEMAN_RULE_PATH}")
+    lines = brief.splitlines()
+    lines[-1] = f"{lines[-1]}; caveman={rule}"
+    return "\n".join(lines)
 
 
 def normalize_reason(label: str, value: str | None) -> str | None:
@@ -209,7 +214,7 @@ def deliverable_lock(deliverable: str) -> Iterator[str]:
 
 @contextmanager
 def route_lock(route: str) -> Iterator[None]:
-    """Serialize each harness lane so Headroom usage stays attributable."""
+    """Serialize each harness lane so workers cannot overlap one runtime."""
     path = safe_state_root() / f"route-{route}.lock"
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     handle = os.fdopen(fd, "w+")
@@ -262,39 +267,19 @@ def start_worker(session: str, name: str, route: Route, pane_id: str) -> subproc
 
 def verify_route_config(route: Route) -> None:
     home = Path.home()
-    if route.name == "opencode":
-        path = home / ".config/opencode/opencode.jsonc"
-        text = path.read_text(encoding="utf-8") if path.is_file() else ""
-        if "headroom/providers/opencode/_dist/entry.opencode.js" not in text:
-            raise RuntimeError(f"OpenCode is not routed through Headroom: {path}")
-    elif route.name == "pi":
-        path = home / ".pi/agent/models.json"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            base_url = data["providers"]["openai-codex"]["baseUrl"]
-        except (KeyError, OSError, TypeError, json.JSONDecodeError) as error:
-            raise RuntimeError(f"Pi Headroom route is unreadable: {path}") from error
-        if base_url != PI_BASE_URL:
-            raise RuntimeError(f"Pi is not routed through Headroom: {path}")
+    policy_paths = {
+        "opencode": home / ".config/opencode/AGENTS.md",
+        "pi": home / ".pi/agent/AGENTS.md",
+    }
+    path = policy_paths.get(route.name)
+    if path is None:
+        return
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if CAVEMAN_SENTINEL not in text:
+        raise RuntimeError(f"{route.name} Caveman policy is unavailable: {path}")
 
 
 def health_gate(route: Route | None = None) -> None:
-    if not shutil.which("headroom"):
-        raise RuntimeError("Headroom is unavailable")
-    try:
-        result = subprocess.run(
-            ["headroom", "doctor"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError("Headroom health gate timed out after 30s") from error
-    if result.returncode != 0 and "0 failure(s)" not in result.stdout:
-        require_ok(result, "Headroom health gate")
-    if "no budget configured" in f"{result.stdout}\n{result.stderr}".lower():
-        raise RuntimeError("Headroom health gate has no spend budget")
     if route:
         verify_route_config(route)
 
@@ -399,11 +384,6 @@ def main() -> int:
             if duplicate_error != "agent_not_found":
                 require_ok(duplicate, "duplicate-agent check")
             health_gate(route)
-            baseline_keys = (
-                [request.key for request in headroom_requests(route.headroom_agent)]
-                if route.headroom_agent
-                else []
-            )
             split_output = require_ok(
                 run(
                     args.session,
@@ -426,7 +406,10 @@ def main() -> int:
             wait_for_shell(args.session, pane_id)
             require_ok(start_worker(args.session, args.name, route, pane_id), "worker start")
             started = True
-            require_ok(run(args.session, "agent", "prompt", args.name, brief), "initial prompt")
+            require_ok(
+                run(args.session, "agent", "prompt", args.name, caveman_worker_prompt(brief)),
+                "initial prompt",
+            )
 
             watcher = Path(__file__).resolve().with_name("watch_worker.py")
             watcher_args = [
@@ -440,17 +423,9 @@ def main() -> int:
                 str(budget["max_seconds"]),
                 "--idle-seconds",
                 str(budget["idle_seconds"]),
-                "--max-requests",
-                str(budget["max_requests"]),
-                "--max-uncached-input-tokens",
-                str(budget["max_uncached_input_tokens"]),
-                "--max-output-tokens",
-                str(budget["max_output_tokens"]),
+                "--max-output-chars",
+                str(budget["max_output_chars"]),
             ]
-            if route.headroom_agent:
-                watcher_args.extend(("--headroom-agent", route.headroom_agent))
-                for key in baseline_keys:
-                    watcher_args.extend(("--baseline-request-key", key))
             watched = subprocess.run(
                 watcher_args,
                 check=False,
