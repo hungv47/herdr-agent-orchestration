@@ -4,7 +4,7 @@
 
 A portable Herdr policy for short, verifiable, token-efficient agent sessions.
 
-The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise brief, one correction at most, and hard time/tool/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses both captain and worker model traffic.
+The default is simple: DIY small work. When orchestration earns its overhead, use one bounded worker, one concise brief, one correction at most, and hard time/tool/token limits. [Headroom](https://github.com/headroomlabs-ai/headroom) compresses captain traffic plus supported worker transports.
 
 ## Runtime
 
@@ -12,11 +12,12 @@ The default is simple: DIY small work. When orchestration earns its overhead, us
 User ↔ captain ↔ Headroom
                  ├─ DIY: captain executes
                  └─ Herdr: one bounded worker by default
-                    ├─ OpenCode → DeepSeek V4 Flash
-                    └─ Codex fallback → GPT-5.6 Luna
+                    ├─ OpenCode → DeepSeek V4 Flash (free, preferred)
+                    ├─ Cline → DeepSeek V4 Flash (free fallback)
+                    └─ Pi → GPT-5.6 Luna (or justified stronger GPT)
 ```
 
-Pi and Cline are intentionally outside the worker pool: the supported Headroom paths here are OpenCode, Codex, and Hermes.
+OpenCode and Pi route through Headroom. Cline's hosted free provider does not expose a compatible local proxy route, so its fallback uses Cline's native agentic compaction, one retry, and a hard 600-second timeout.
 
 ## Hard contract
 
@@ -32,20 +33,21 @@ Pi and Cline are intentionally outside the worker pool: the supported Headroom p
 Worker order:
 
 1. DeepSeek V4 Flash `xhigh` through OpenCode.
-2. GPT-5.6 Luna `Max` through Codex.
+2. DeepSeek V4 Flash `xhigh` through bounded Cline when OpenCode is unavailable.
+3. GPT-5.6 Luna `Max` through Pi when free routes are unavailable or GPT is justified.
 
 Use only Herdr sessions `ipse`, `biz`, and `work`.
 
 ## Install
 
-Prerequisites: Bash, Python 3, `uv`, Herdr, Hermes, Codex, and OpenCode.
+Prerequisites: Bash, Python 3, `uv`, Herdr, Hermes, OpenCode, Cline, and Pi.
 
 ```bash
 # Preview policy links, then apply.
 bash scripts/install.sh
 bash scripts/install.sh --apply
 
-# Install Headroom 0.34.0 and route Hermes/Codex/OpenCode.
+# Install Headroom 0.34.0 and route Hermes/Pi/OpenCode.
 sh scripts/install-headroom.sh
 
 bash scripts/verify.sh
@@ -56,7 +58,7 @@ The policy installer also injects a marked policy fragment into an existing Buzz
 
 - runs a loopback-only persistent proxy with telemetry off;
 - enables code-aware compression and output shaping;
-- routes Codex and Hermes through the proxy;
+- routes Pi GPT and Hermes through the proxy;
 - installs Headroom's packaged OpenCode transport plugin;
 - installs the Hermes retrieval tool;
 - reduces Hermes prompt/tool noise and enables loop hard stops; and

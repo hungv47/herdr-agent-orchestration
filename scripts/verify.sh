@@ -42,14 +42,16 @@ done
 python3 -m py_compile scripts/configure-headroom.py skills/ops-herdr-orchestration/scripts/audit_session.py skills/ops-herdr-orchestration/scripts/watch_worker.py
 
 for file in AGENTS.md README.md skills/ops-herdr-orchestration/SKILL.md; do
-  for phrase in 'Headroom' 'DeepSeek V4 Flash' 'GPT-5.6 Luna' 'Default to one worker' '1,200 characters' '10 minutes' '40 tool calls' 'one corrective prompt' 'five minutes'; do
+  for phrase in 'Headroom' 'DeepSeek V4 Flash' 'Cline' 'GPT-5.6 Luna' 'Pi' 'Default to one worker' '1,200 characters' '10 minutes' '40 tool calls' 'one corrective prompt' 'five minutes'; do
     need "$file" "$phrase"
   done
 done
-for stale in 'eval_run.py' 'efficiency preflight' 'cli: Pi CLI' 'OpenCode or Cline CLI' 'run both workers'; do
+for stale in 'eval_run.py' 'efficiency preflight' 'Codex CLI' 'run both workers'; do
   ! grep -Fqi "$stale" AGENTS.md README.md skills/ops-herdr-orchestration/SKILL.md ||
     fail "retired ceremony remains: $stale"
 done
+need scripts/configure-headroom.py 'def configure_pi'
+need scripts/configure-headroom.py '"openai-codex"'
 
 # One synthetic over-budget transcript proves the audit fails closed.
 cat >"$tmp/waste.jsonl" <<'JSON'

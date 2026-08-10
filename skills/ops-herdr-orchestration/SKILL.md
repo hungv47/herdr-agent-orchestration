@@ -1,7 +1,7 @@
 ---
 name: ops-herdr-orchestration
 description: "Use when choosing DIY vs Herdr, briefing or supervising Herdr workers, preventing retry loops, or auditing orchestration token efficiency."
-version: 6.0.0
+version: 6.1.0
 license: MIT
 platforms: [macos, linux]
 ---
@@ -27,9 +27,10 @@ herdr --session <ipse|biz|work> agent list
 Headroom must be healthy. Worker order is binding:
 
 1. DeepSeek V4 Flash `xhigh` through OpenCode.
-2. GPT-5.6 Luna `Max` through Codex.
+2. The same free DeepSeek model through Cline when OpenCode is unavailable; launch Cline with `--thinking xhigh --compaction agentic --retries 1 --timeout 600`.
+3. GPT through Pi when the free routes are unavailable or the brief explicitly requires GPT. Default to GPT-5.6 Luna `Max`; a stronger GPT model requires a one-line justification in the brief.
 
-Do not use Pi, Cline, or another fallback. Default to one worker and one whole, independently verifiable deliverable. Parallelize only disjoint deliverables with satisfied dependencies, separate writable and semantic surfaces, and lower integration cost than serial work.
+Do not run OpenCode and Cline for the same deliverable or use another fallback. Default to one worker and one whole, independently verifiable deliverable. Parallelize only disjoint deliverables with satisfied dependencies, separate writable and semantic surfaces, and lower integration cost than serial work.
 
 ## Compact bridge
 

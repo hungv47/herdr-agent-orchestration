@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure OpenCode and Hermes to use the local Headroom proxy."""
+"""Configure OpenCode, Pi GPT, and Hermes to use the local Headroom proxy."""
 
 from __future__ import annotations
 
@@ -115,6 +115,35 @@ def configure_opencode(check: bool) -> bool:
     return True
 
 
+def configure_pi(check: bool) -> bool:
+    agent_dir = HOME / ".pi/agent"
+    executable = shutil.which("pi")
+    if not agent_dir.is_dir() or not executable:
+        return True
+    package_root = Path(executable).resolve().parent.parent
+    api_path = package_root / "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"
+    old = '''    const normalized = raw.replace(/\\/+$/, "");
+    if (normalized.endsWith("/codex/responses"))'''
+    new = '''    const normalized = raw.replace(/\\/+$/, "");
+    if (normalized.endsWith("/v1"))
+        return `${normalized}/responses`;
+    if (normalized.endsWith("/codex/responses"))'''
+    package_current = patch_text(api_path, old, new, check)
+    path = agent_dir / "models.json"
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    providers = data.setdefault("providers", {})
+    provider = providers.setdefault("openai-codex", {})
+    if provider.get("baseUrl") == BASE_URL:
+        return package_current
+    if check:
+        return False
+    if path.exists() and not path.with_suffix(path.suffix + ".pre-headroom").exists():
+        shutil.copy2(path, path.with_suffix(path.suffix + ".pre-headroom"))
+    provider["baseUrl"] = BASE_URL
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return package_current
+
+
 def set_env(path: Path, check: bool) -> bool:
     if not path.exists():
         return True
@@ -202,6 +231,8 @@ def main() -> int:
     failures: list[str] = []
     if not configure_opencode(args.check):
         failures.append(str(HOME / ".config/opencode/opencode.jsonc"))
+    if not configure_pi(args.check):
+        failures.append(str(HOME / ".pi/agent/models.json"))
     failures.extend(configure_hermes(args.check))
     if failures:
         print("Headroom configuration drift:")

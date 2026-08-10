@@ -4,23 +4,24 @@
 
 A direct-open session is the user-facing captain. A child session, `AGENT_ROLE=worker`, or `role=worker` brief is a worker.
 
-Before side effects say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask once unless the user already chose. Prefer DIY for small, cohesive, low-risk, borderline, or read-mostly work. Orchestrate only when independent workstreams, specialization, risk, or duration repay dispatch and verification overhead. The user's choice wins for the same scope; safety confirmations remain separate.
+Before side effects say `Recommendation: DIY|orchestrate — <reason>. Choose: DIY or orchestrate.` Ask once unless the user chose. Prefer DIY for small or borderline work; orchestrate only when independent workstreams, specialization, risk, or duration repay overhead. The choice holds for the same scope; safety confirmations remain separate.
 
 - **DIY:** execute and verify directly. Do not use Herdr.
 - **Orchestrate:** remain the sole user contact; perform no task writes. Brief, supervise, verify read-only, and report. Never switch modes because a worker stalls.
 
 ## Efficient orchestration
 
-All orchestrated execution uses one of three pre-created Herdr sessions: `ipse` (personal), `biz` (business/product), or `work` (current employment). Headroom must be healthy before dispatch and route captain and worker model traffic.
+Use Herdr session `ipse` (personal), `biz` (business/product), or `work` (employment). Headroom must be healthy before dispatch and route captain, OpenCode, and Pi traffic. Hosted Cline uses native compaction and the hard timeout.
 
 Worker order is binding:
 
 1. **DeepSeek V4 Flash** — `xhigh`, OpenCode.
-2. **GPT-5.6 Luna Max** — `Max`, Codex CLI.
+2. **DeepSeek V4 Flash** — `xhigh`, Cline with `--compaction agentic --retries 1 --timeout 600`.
+3. **GPT-5.6 Luna Max** — `Max`, Pi CLI.
 
-Use the first available entry. Do not use Pi or Cline. If neither is available, wait/retry/report blocked; never use a third model or harness. External visibility still requires authorization.
+Use the first available entry unless the brief requires GPT. A stronger GPT model in Pi needs one-line justification. If none is available, wait/retry/report blocked; never use another model or harness. Do not run OpenCode and Cline on the same deliverable. External visibility requires authorization.
 
-Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent deliverables with satisfied dependencies, disjoint writable and semantic surfaces, separate runtime resources, and lower integration cost than serial work. More workers are not more progress.
+Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint writable and semantic surfaces, separate resources, and cheaper integration than serial work.
 
 Every worker brief is at most 1,200 characters:
 
