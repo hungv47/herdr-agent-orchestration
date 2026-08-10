@@ -21,8 +21,9 @@ need() { grep -Fq "$2" "$1" || fail "$1 missing: $2"; }
 
 required=(
   README.md AGENTS.md LICENSE .gitignore ATTRIBUTION.md scripts/install.sh scripts/verify.sh
-  scripts/herdr-guard scripts/install-headroom.sh scripts/configure-headroom.py
+  scripts/herdr-guard
   skills/ops-herdr-orchestration/SKILL.md
+  skills/ops-herdr-orchestration/references/caveman-activate.md
   skills/ops-herdr-orchestration/scripts/dispatch_worker.py
   skills/ops-herdr-orchestration/scripts/watch_worker.py
   skills/ops-herdr-orchestration/scripts/worker_runtime.py
@@ -32,21 +33,20 @@ required=(
 )
 for file in "${required[@]}"; do [[ -f "$file" ]] || fail "missing $file"; done
 for script in scripts/install.sh scripts/verify.sh scripts/herdr-guard; do bash -n "$script"; done
-sh -n scripts/install-headroom.sh
 python3 -m py_compile "$skill_root"/scripts/*.py tests/test_dispatch_worker.py
 python3 -m unittest discover -s tests -v
 
 [[ $(wc -c <AGENTS.md) -lt 4000 ]] || fail 'AGENTS.md is verbose'
 for phrase in \
-  'Recommendation: DIY|orchestrate' 'Prefer DIY' 'Headroom must be healthy' \
+  'Recommendation: DIY|orchestrate' 'Prefer DIY' 'Respond terse like smart caveman' \
   'DeepSeek V4 Flash' 'OpenCode' 'Cline' 'GPT-5.6 Luna Max' 'Pi CLI' \
   'Default to one worker' 'at most 1,200 characters' 'eight model iterations' \
-  'five model requests' '50k uncached input tokens' 'A blocked receipt ends the attempt' \
-  'installed Herdr guard' '$5 daily budget' \
+  '20k visible output characters' 'A blocked receipt ends the attempt' \
+  'installed Herdr guard' 'Provider dashboards remain the source of truth' \
   'dispatch_worker.py'; do
   need AGENTS.md "$phrase"
 done
-for stale in 'eval_run.py' 'efficiency preflight' 'one corrective prompt' 'wait/retry' '40 Headroom requests'; do
+for stale in 'eval_run.py' 'efficiency preflight' 'one corrective prompt' 'wait/retry' 'Cavecrew'; do
   ! grep -Fqi "$stale" AGENTS.md README.md "$skill_root/SKILL.md" || fail "stale ceremony: $stale"
 done
 
@@ -92,8 +92,7 @@ if "$installed"; then
     "$HOME/.config/opencode/AGENTS.md" "$HOME/.claude/CLAUDE.md" "$HOME/.grok/AGENTS.md" "$HOME/.hermes/AGENTS.md"; do
     [[ -L "$target" && "$target" -ef "$repo_root/AGENTS.md" ]] || fail "invalid installed link: $target"
   done
-  command -v headroom >/dev/null 2>&1 || fail 'Headroom is not installed'
-  headroom doctor 2>&1 | grep -Fq '0 failure(s)' || fail 'Headroom is unhealthy'
+  grep -Fq 'Respond terse like smart caveman' "$HOME/.codex/AGENTS.md" || fail 'Caveman policy drift'
   if command -v hermes >/dev/null 2>&1; then
     [[ $(hermes config get agent.max_turns) == 8 ]] || fail 'Hermes max_turns drift'
     [[ $(hermes config get memory.nudge_interval) == 0 ]] || fail 'Hermes memory review drift'
@@ -101,6 +100,11 @@ if "$installed"; then
     [[ $(hermes config get tool_loop_guardrails.loop_caps.max_subagents) == 1 ]] || fail 'Hermes subagent cap drift'
     [[ $(hermes config get code_execution.max_tool_calls) == 12 ]] || fail 'Hermes tool-call drift'
   fi
+fi
+
+removed_proxy='head''room'
+if grep -REin "$removed_proxy" --exclude-dir=.git .; then
+  fail 'removed proxy still referenced'
 fi
 
 printf 'Verification passed%s.\n' "$("$installed" && printf ' (installed state checked)')"

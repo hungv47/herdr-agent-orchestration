@@ -10,7 +10,7 @@ import json
 import re
 import time
 
-from worker_runtime import headroom_requests, herdr
+from worker_runtime import herdr
 
 
 def parse_status(data: object) -> str:
@@ -33,34 +33,13 @@ def status(session: str, agent: str) -> str:
 
 
 def screen_output(session: str, agent: str) -> str:
-    result = herdr(session, "agent", "read", agent, "--source", "recent-unwrapped", "--lines", "120")
+    result = herdr(session, "agent", "read", agent, "--source", "recent-unwrapped", "--lines", "400")
     return result.stdout if result.returncode == 0 else ""
 
 
-def usage_limit_reason(
-    deltas: dict[str, int],
-    max_requests: int,
-    max_uncached_input_tokens: int,
-    max_output_tokens: int,
-) -> str | None:
-    if deltas["requests"] >= max_requests:
-        return "request_limit"
-    if deltas["uncached_input_tokens"] >= max_uncached_input_tokens:
-        return "uncached_input_token_limit"
-    if deltas["output_tokens"] >= max_output_tokens:
-        return "output_token_limit"
-    return None
-
-
-def add_new_requests(agent: str, seen: set[str], deltas: dict[str, int]) -> None:
-    for request in headroom_requests(agent):
-        if request.key in seen:
-            continue
-        seen.add(request.key)
-        deltas["requests"] += 1
-        deltas["uncached_input_tokens"] += request.uncached_input_tokens
-        deltas["gross_input_tokens"] += request.gross_input_tokens
-        deltas["output_tokens"] += request.output_tokens
+def output_limit_reached(output: str, max_output_chars: int) -> bool:
+    """Bound visible worker chatter without claiming provider-token precision."""
+    return len(output) >= max_output_chars
 
 
 FAILURE_RE = re.compile(r"\b(error|failed|failure|exception|traceback|timed? out|not found|denied|unauthorized)\b", re.I)
@@ -95,26 +74,14 @@ def main() -> int:
     parser.add_argument("--max-seconds", type=int, default=300)
     parser.add_argument("--idle-seconds", type=int, default=90)
     parser.add_argument("--poll-seconds", type=int, default=2)
-    parser.add_argument("--max-requests", type=int, default=5)
-    parser.add_argument("--max-uncached-input-tokens", type=int, default=50000)
-    parser.add_argument("--max-output-tokens", type=int, default=5000)
-    parser.add_argument("--headroom-agent", choices=("opencode", "codex"))
-    parser.add_argument("--baseline-request-key", action="append", default=[])
+    parser.add_argument("--max-output-chars", type=int, default=20000)
     args = parser.parse_args()
     if not 1 <= args.max_seconds <= 1200:
         parser.error("--max-seconds must be 1..1200")
     started = time.monotonic()
     last_digest = ""
     last_change = started
-    usage_failures = 0
     unknown_statuses = 0
-    deltas = {
-        "requests": 0,
-        "uncached_input_tokens": 0,
-        "gross_input_tokens": 0,
-        "output_tokens": 0,
-    }
-    seen = set(args.baseline_request_key)
     while True:
         current = status(args.session, args.agent)
         elapsed = int(time.monotonic() - started)
@@ -132,30 +99,13 @@ def main() -> int:
             reason = "wall_limit"
         elif idle_limit_reached(last_change, now, args.idle_seconds):
             reason = "idle_limit"
+        elif output_limit_reached(output, args.max_output_chars):
+            reason = "output_limit"
         elif repeated_failure_signature(output):
             reason = "repeated_failure"
         elif unknown_statuses >= 3:
             reason = "status_unavailable"
-        usage_checked = not args.headroom_agent
-        if not reason and args.headroom_agent:
-            try:
-                add_new_requests(args.headroom_agent, seen, deltas)
-                usage_failures = 0
-                usage_checked = True
-                reason = usage_limit_reason(
-                    deltas,
-                    args.max_requests,
-                    args.max_uncached_input_tokens,
-                    args.max_output_tokens,
-                )
-            except (OSError, ValueError, json.JSONDecodeError):
-                usage_failures += 1
-                if usage_failures >= 3:
-                    reason = "usage_unavailable"
         if not reason and current in {"done", "idle"}:
-            if not usage_checked:
-                time.sleep(min(args.poll_seconds, 5))
-                continue
             receipt_seen = bool(re.search(r"(?im)^\s*(accepted|blocked)\s*:", output))
             if not receipt_seen and elapsed < min(10, args.max_seconds):
                 time.sleep(min(args.poll_seconds, 5))
@@ -168,8 +118,6 @@ def main() -> int:
             payload["interrupt_confirmed"] = interrupted
             if not interrupted:
                 payload["reason"] = f"{reason}+interrupt_failed"
-            if args.headroom_agent:
-                payload["usage"] = deltas
             print(json.dumps(payload))
             return 2
         time.sleep(args.poll_seconds)

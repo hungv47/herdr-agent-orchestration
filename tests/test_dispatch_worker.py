@@ -93,15 +93,10 @@ class DispatchWorkerTests(unittest.TestCase):
         self.assertEqual(parse("accepted: looks good")[0], "blocked")
         self.assertEqual(parse("looks good but no receipt")[0], "blocked")
 
-    def test_usage_limits_fail_closed_at_the_ceiling(self) -> None:
-        reason = self.watcher.usage_limit_reason
-        below = {"requests": 7, "uncached_input_tokens": 79_999, "output_tokens": 7_999}
-        self.assertIsNone(reason(below, 8, 80_000, 8_000))
-        self.assertEqual(reason({**below, "requests": 8}, 8, 80_000, 8_000), "request_limit")
-        self.assertEqual(
-            reason({**below, "uncached_input_tokens": 80_000}, 8, 80_000, 8_000),
-            "uncached_input_token_limit",
-        )
+    def test_visible_output_limit_is_deterministic(self) -> None:
+        reached = self.watcher.output_limit_reached
+        self.assertFalse(reached("x" * 19_999, 20_000))
+        self.assertTrue(reached("x" * 20_000, 20_000))
 
     def test_status_reads_real_nested_herdr_payload(self) -> None:
         payload = {"result": {"agent": {"agent_status": "working"}, "type": "agent_info"}}
@@ -109,64 +104,19 @@ class DispatchWorkerTests(unittest.TestCase):
         self.assertEqual(self.watcher.parse_status({"agent_status": "done"}), "done")
         self.assertEqual(self.watcher.parse_status({}), "unknown")
 
-    def test_real_headroom_stats_shape_enforces_usage(self) -> None:
-        payload = {
-            "summary": {"mode": "token"},
-            "agent_usage": {
-                "agents": [
-                    {"agent": "opencode", "requests": 41, "after_tokens": 81_000, "output_tokens": 21_000}
-                ]
-            },
-        }
-        self.assertEqual(self.dispatch.headroom_requests.__module__, "worker_runtime")
-        runtime = sys.modules["worker_runtime"]
-        self.assertEqual(runtime.parse_headroom_totals(payload, "opencode"), (41, 81_000, 21_000))
-
-    def test_headroom_requests_charge_uncached_not_replayed_context(self) -> None:
-        runtime = sys.modules["worker_runtime"]
-        payload = {
-            "request_logs": [
-                {
-                    "request_id": "r1",
-                    "timestamp": "2026-01-01T00:00:00",
-                    "model": "deepseek-v4-flash-free",
-                    "input_tokens_optimized": 60_000,
-                    "uncached_input_tokens": 4_000,
-                    "output_tokens": 300,
-                    "tags": {"client": "opencode"},
-                },
-                {
-                    "request_id": "r2",
-                    "timestamp": "2026-01-01T00:00:01",
-                    "model": "gpt-5.6-luna",
-                    "input_tokens_optimized": 70_000,
-                    "uncached_input_tokens": 2_000,
-                    "output_tokens": 100,
-                    "tags": {"client": "codex"},
-                },
-            ]
-        }
-        requests = runtime.parse_headroom_requests(payload, "opencode")
-        self.assertEqual(len(requests), 1)
-        self.assertEqual(requests[0].uncached_input_tokens, 4_000)
-        self.assertEqual(requests[0].gross_input_tokens, 60_000)
-
-    def test_watcher_counts_each_recent_request_once(self) -> None:
-        runtime = sys.modules["worker_runtime"]
-        request = runtime.HeadroomRequest("r1", 2_000, 60_000, 100)
-        deltas = {
-            "requests": 0,
-            "uncached_input_tokens": 0,
-            "gross_input_tokens": 0,
-            "output_tokens": 0,
-        }
-        with mock.patch.object(self.watcher, "headroom_requests", return_value=[request]):
-            seen: set[str] = set()
-            self.watcher.add_new_requests("opencode", seen, deltas)
-            self.watcher.add_new_requests("opencode", seen, deltas)
-        self.assertEqual(deltas["requests"], 1)
-        self.assertEqual(deltas["uncached_input_tokens"], 2_000)
-        self.assertEqual(deltas["gross_input_tokens"], 60_000)
+    def test_worker_prompt_adds_caveman_without_an_extra_line(self) -> None:
+        brief = "\n".join(
+            (
+                "role=worker; outcome=one result",
+                "write=src/result.py",
+                "non-goals=no delegation",
+                "accept=python3 -m unittest",
+                "return=accepted|blocked: paths=<paths>; checks=<checks>; blocker=<blocker>; then stop",
+            )
+        )
+        prompt = self.dispatch.caveman_worker_prompt(brief)
+        self.assertEqual(len(prompt.splitlines()), 5)
+        self.assertIn(self.dispatch.CAVEMAN_SENTINEL, prompt.splitlines()[-1])
 
     def test_route_lock_rejects_parallel_same_harness(self) -> None:
         with self.dispatch.route_lock("opencode"):
@@ -184,31 +134,6 @@ class DispatchWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not be blank"):
             self.dispatch.normalize_reason("gpt reason", "   ")
 
-    def test_headroom_health_gate_accepts_warning_only_doctor_exit(self) -> None:
-        warning_only = subprocess.CompletedProcess(
-            ["headroom", "doctor"],
-            1,
-            stdout="0 failure(s), 3 warning(s)\n",
-            stderr="",
-        )
-        with mock.patch.object(self.dispatch.shutil, "which", return_value="/usr/local/bin/headroom"), mock.patch.object(
-            self.dispatch.subprocess, "run", return_value=warning_only
-        ):
-            self.dispatch.health_gate()
-
-    def test_headroom_health_gate_rejects_unlimited_spend(self) -> None:
-        unlimited = subprocess.CompletedProcess(
-            ["headroom", "doctor"],
-            1,
-            stdout="0 failure(s), 1 warning(s): no budget configured - spend is unlimited\n",
-            stderr="",
-        )
-        with mock.patch.object(self.dispatch.shutil, "which", return_value="/usr/local/bin/headroom"), mock.patch.object(
-            self.dispatch.subprocess, "run", return_value=unlimited
-        ):
-            with self.assertRaisesRegex(RuntimeError, "no spend budget"):
-                self.dispatch.health_gate()
-
     def test_worker_start_retries_a_new_pane_until_its_shell_is_ready(self) -> None:
         busy = subprocess.CompletedProcess(
             ["herdr"],
@@ -217,7 +142,7 @@ class DispatchWorkerTests(unittest.TestCase):
             stderr='{"error":{"code":"agent_pane_busy"}}',
         )
         ready = subprocess.CompletedProcess(["herdr"], 0, stdout="{}", stderr="")
-        route = self.dispatch.Route("opencode", ("-m", "model"), "opencode")
+        route = self.dispatch.Route("opencode", ("-m", "model"))
         with mock.patch.object(self.dispatch, "run", side_effect=(busy, ready)) as run, mock.patch.object(
             self.dispatch.time, "sleep"
         ):
@@ -239,23 +164,17 @@ class DispatchWorkerTests(unittest.TestCase):
     def test_route_config_is_verified_per_selected_client(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
-            opencode = home / ".config/opencode/opencode.jsonc"
+            opencode = home / ".config/opencode/AGENTS.md"
             opencode.parent.mkdir(parents=True)
-            opencode.write_text(
-                json.dumps({"plugin": ["file:///tmp/headroom/providers/opencode/_dist/entry.opencode.js"]}),
-                encoding="utf-8",
-            )
-            pi = home / ".pi/agent/models.json"
+            opencode.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
+            pi = home / ".pi/agent/AGENTS.md"
             pi.parent.mkdir(parents=True)
-            pi.write_text(
-                json.dumps({"providers": {"openai-codex": {"baseUrl": self.dispatch.PI_BASE_URL}}}),
-                encoding="utf-8",
-            )
+            pi.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
             with mock.patch.object(self.dispatch.Path, "home", return_value=home):
                 self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
                 self.dispatch.verify_route_config(self.dispatch.build_route("pi"))
                 opencode.write_text("{}", encoding="utf-8")
-                with self.assertRaisesRegex(RuntimeError, "not routed through Headroom"):
+                with self.assertRaisesRegex(RuntimeError, "Caveman policy is unavailable"):
                     self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
 
     def test_cleanup_requires_exact_pane_to_be_gone(self) -> None:
