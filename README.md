@@ -14,8 +14,6 @@ A small policy and eval suite for leading cheaper coding models through official
 
 Official [Herdr](https://github.com/herdrdev/herdr) owns terminal, pane, agent, wait, and timeout mechanics. This project intentionally has no dispatcher, watcher, proxy manager, Herdr wrapper, or installer that rewrites agent homes.
 
-The retired runtime implementation remains preserved on branch [`codex/archive-runtime-v1-20260810`](https://github.com/hungv47/herdr-agent-orchestration/tree/codex/archive-runtime-v1-20260810).
-
 ## Operating contract
 
 1. Work directly unless delegation has clear net value.
