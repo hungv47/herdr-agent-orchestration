@@ -27,8 +27,14 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo_root=$(cd -- "$script_dir/.." && pwd -P)
 source_file="$repo_root/AGENTS.md"
 source_skill="$repo_root/skills/ops-herdr-orchestration"
+guard_source="$repo_root/scripts/herdr-guard"
+guard_front="$HOME/.local/bin/herdr"
+guard_real="$HOME/.local/libexec/herdr-real"
+guard_available=true
+guard_external=$(command -v herdr 2>/dev/null || true)
 [[ -f "$source_file" ]] || { printf 'Missing source policy: %s\n' "$source_file" >&2; exit 1; }
 [[ -f "$source_skill/SKILL.md" ]] || { printf 'Missing source skill: %s\n' "$source_skill" >&2; exit 1; }
+[[ -x "$guard_source" ]] || { printf 'Missing executable Herdr guard: %s\n' "$guard_source" >&2; exit 1; }
 
 policy_targets=(
   "$HOME/.agents/AGENTS.md"
@@ -75,6 +81,13 @@ done
 for target in "${skill_targets[@]}"; do
   preflight_target "$source_skill" "$target"
 done
+if [[ -L "$guard_front" && $(readlink "$guard_front") != "$guard_source" ]]; then
+  printf 'Refusing unrelated Herdr symlink: %s\n' "$guard_front" >&2
+  exit 1
+fi
+if [[ ! -e "$guard_front" && ! -e "$guard_real" && -z "$guard_external" ]]; then
+  guard_available=false
+fi
 
 install_target() {
   local source=$1 target=$2 label=$3
@@ -100,6 +113,34 @@ for target in "${skill_targets[@]}"; do
   install_target "$source_skill" "$target" skill
 done
 
+install_herdr_guard() {
+  if ! "$guard_available"; then
+    printf 'skip Herdr guard: runtime is not installed\n'
+    return
+  fi
+  if ! "$apply"; then
+    printf 'would guard Herdr mutations: %s\n' "$guard_front"
+    return
+  fi
+  mkdir -p "$(dirname -- "$guard_front")" "$(dirname -- "$guard_real")"
+  if [[ ! -e "$guard_front" && ! -e "$guard_real" && -n "$guard_external" ]]; then
+    ln -s "$guard_external" "$guard_real"
+  fi
+  if [[ ! -L "$guard_front" && -e "$guard_front" ]]; then
+    if [[ -e "$guard_real" ]]; then
+      previous="$guard_real.previous-$(date +%Y%m%d-%H%M%S)-$$"
+      mv "$guard_real" "$previous"
+      printf 'archived prior Herdr runtime: %s\n' "$previous"
+    fi
+    mv "$guard_front" "$guard_real"
+  fi
+  [[ -L "$guard_front" ]] || ln -s "$guard_source" "$guard_front"
+  [[ -x "$guard_real" ]] || { printf 'Herdr runtime is not executable: %s\n' "$guard_real" >&2; exit 1; }
+  printf 'guarded Herdr mutations: %s\n' "$guard_front"
+}
+
+install_herdr_guard
+
 configure_hermes_home() {
   local hermes_home=$1
   command -v hermes >/dev/null 2>&1 || return 0
@@ -110,6 +151,7 @@ configure_hermes_home() {
   HERMES_HOME="$hermes_home" hermes config set --force agent.max_turns 8 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force memory.nudge_interval 0 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force skills.creation_nudge_interval 0 >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.loop_caps.max_subagents 1 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force code_execution.max_tool_calls 12 >/dev/null
   printf 'configured Hermes ceilings: %s\n' "$hermes_home"
 }

@@ -16,12 +16,12 @@ Use Herdr session `ipse`, `biz`, or `work`. Headroom must be healthy and route c
 Worker order is binding:
 
 1. **DeepSeek V4 Flash** — `xhigh`, OpenCode.
-2. **DeepSeek V4 Flash** — `xhigh`, Cline with `--compaction agentic --retries 1 --timeout 600`.
+2. **DeepSeek V4 Flash** — `xhigh`, Cline with `--compaction agentic --retries 1 --timeout 300`.
 3. **GPT-5.6 Luna Max** — `Max`, Pi CLI.
 
 Use OpenCode first; Cline only as fallback or a disjoint second free lane; Pi only for explicit GPT work. Stronger GPT needs one-line justification. Never run two lanes on one deliverable. Never use another model or harness.
 
-Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`. It locks duplicate deliverables and each harness lane, owns one pane and prompt, enforces budgets, and returns one receipt. Never call raw worker start or prompt commands.
+Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`. It locks duplicate deliverables and each harness lane, owns one pane and prompt, enforces budgets, verifies teardown, and returns one receipt. The installed Herdr guard mechanically blocks raw mutations.
 
 Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint writable and semantic surfaces, separate resources, and cheaper integration than serial work.
 
@@ -37,6 +37,6 @@ Workers do not delegate, narrate progress, or write plans. The dispatcher sends 
 
 Configure Hermes for eight model iterations per user turn with automatic memory/skill review disabled. The captain makes one dispatch call, waits for its receipt, verifies once, and reports. It never repairs orchestration infrastructure during a product run.
 
-The dispatcher hard-stops at eight minutes, two idle minutes, eight model requests, 80k uncached input tokens, or 8k output. Substantial work gets 15 minutes, 12 requests, 140k uncached input, and 16k output with one-line justification. Cached context is reported, not charged as new work.
+The dispatcher hard-stops at five minutes, 90 idle seconds, five model requests, 50k uncached input tokens, or 5k output. Substantial work gets 10 minutes, eight requests, 90k uncached input, and 10k output with one-line justification. Headroom also enforces a $5 daily budget, 60k TPM, 10 RPM, and three concurrent connections unless the operator explicitly overrides them. Cached context is reported, not charged as new work.
 
 Procedure: `skills/ops-herdr-orchestration/SKILL.md`.

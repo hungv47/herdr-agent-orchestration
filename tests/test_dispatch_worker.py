@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -194,6 +196,19 @@ class DispatchWorkerTests(unittest.TestCase):
         ):
             self.dispatch.health_gate()
 
+    def test_headroom_health_gate_rejects_unlimited_spend(self) -> None:
+        unlimited = subprocess.CompletedProcess(
+            ["headroom", "doctor"],
+            1,
+            stdout="0 failure(s), 1 warning(s): no budget configured - spend is unlimited\n",
+            stderr="",
+        )
+        with mock.patch.object(self.dispatch.shutil, "which", return_value="/usr/local/bin/headroom"), mock.patch.object(
+            self.dispatch.subprocess, "run", return_value=unlimited
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no spend budget"):
+                self.dispatch.health_gate()
+
     def test_worker_start_retries_a_new_pane_until_its_shell_is_ready(self) -> None:
         busy = subprocess.CompletedProcess(
             ["herdr"],
@@ -220,6 +235,89 @@ class DispatchWorkerTests(unittest.TestCase):
         with mock.patch.object(self.dispatch, "run", side_effect=(busy, ready)) as run:
             self.dispatch.wait_for_shell("work", "w2:p2", timeout=1, interval=0)
         self.assertEqual(run.call_count, 2)
+
+    def test_route_config_is_verified_per_selected_client(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            opencode = home / ".config/opencode/opencode.jsonc"
+            opencode.parent.mkdir(parents=True)
+            opencode.write_text(
+                json.dumps({"plugin": ["file:///tmp/headroom/providers/opencode/_dist/entry.opencode.js"]}),
+                encoding="utf-8",
+            )
+            pi = home / ".pi/agent/models.json"
+            pi.parent.mkdir(parents=True)
+            pi.write_text(
+                json.dumps({"providers": {"openai-codex": {"baseUrl": self.dispatch.PI_BASE_URL}}}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(self.dispatch.Path, "home", return_value=home):
+                self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
+                self.dispatch.verify_route_config(self.dispatch.build_route("pi"))
+                opencode.write_text("{}", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "not routed through Headroom"):
+                    self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
+
+    def test_cleanup_requires_exact_pane_to_be_gone(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        missing = subprocess.CompletedProcess(
+            [], 1, stdout='{"error":{"code":"pane_not_found"}}', stderr=""
+        )
+        with mock.patch.object(self.dispatch, "run", side_effect=(ok, ok, missing)):
+            self.assertIsNone(self.dispatch.cleanup_worker("ipse", "worker", "%9", True))
+        with mock.patch.object(self.dispatch, "run", return_value=ok), mock.patch.object(
+            self.dispatch.time, "sleep"
+        ):
+            self.assertIn("still present", self.dispatch.cleanup_worker("ipse", "worker", "%9", True))
+
+    def test_herdr_guard_blocks_raw_mutations_but_allows_dispatcher(self) -> None:
+        guard = Path(__file__).resolve().parents[1] / "scripts/herdr-guard"
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "herdr-real"
+            real.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            real.chmod(0o700)
+            env = {**os.environ, "IPSE_HERDR_REAL_BIN": str(real)}
+            blocked = subprocess.run(
+                [str(guard), "--session", "ipse", "agent", "start", "w"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(blocked.returncode, 64)
+            allowed = subprocess.run(
+                [str(guard), "--session", "ipse", "agent", "list"],
+                check=False,
+                env=env,
+            )
+            self.assertEqual(allowed.returncode, 0)
+            authorized = subprocess.run(
+                [str(guard), "--session", "ipse", "agent", "start", "w"],
+                check=False,
+                env={**env, "IPSE_HERDR_DISPATCH": "1"},
+            )
+            self.assertEqual(authorized.returncode, 0)
+
+    def test_hermes_session_audit_detects_raw_bypass_and_total_budget(self) -> None:
+        audit = SCRIPT.with_name("audit_hermes_session.py")
+        session = "session-raw"
+        lines = [
+            f"2026-01-01 00:00:00,000 INFO [{session}] agent.turn_context: conversation turn:",
+            f"2026-01-01 00:00:01,000 INFO [{session}] agent.conversation_loop: API call #1: model=x in=500001 out=1",
+            f"2026-01-01 00:00:02,000 INFO [{session}] agent.tool_executor: herdr --session ipse agent start worker",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "agent.log"
+            log.write_text("\n".join(lines), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(audit), str(log), "--session", session, "--orchestrated"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("input_tokens=500001>400000", result.stdout)
+        self.assertIn("raw_herdr_mutations=1>0", result.stdout)
 
     def test_hermes_session_audit_rejects_captain_loops_and_writes(self) -> None:
         audit = SCRIPT.with_name("audit_hermes_session.py")

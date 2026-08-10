@@ -1,7 +1,7 @@
 ---
 name: ops-herdr-orchestration
 description: "Use when choosing DIY vs Herdr, briefing or supervising Herdr workers, preventing retry loops, or auditing orchestration token efficiency."
-version: 2.0.0
+version: 3.0.0
 license: MIT
 platforms: [macos, linux]
 metadata:
@@ -23,7 +23,7 @@ Binding policy: the repository root `AGENTS.md`.
 
 Before dispatch, require healthy Headroom and an existing Herdr session. Use OpenCode DeepSeek first, Cline DeepSeek only as fallback or a disjoint second free lane, and Pi GPT only with a capability reason.
 
-Every worker starts through `scripts/dispatch_worker.py`. It locks the deliverable and harness lane, creates one pane, sends one brief, supervises the worker, closes that pane, and returns one `accepted|blocked` receipt. The lane lock prevents parallel workers from charging one another's Headroom counters.
+Every worker starts through `scripts/dispatch_worker.py`. It locks the deliverable and harness lane, creates one pane, sends one brief, supervises the worker, verifies that exact pane is gone, and returns one `accepted|blocked` receipt. The lane lock prevents parallel workers from charging one another's Headroom counters. The installed `herdr-guard` mechanically blocks raw mutations.
 
 ## Compact bridge
 
@@ -39,7 +39,7 @@ Workers do not delegate, narrate progress, write plans, or perform discovery the
 
 ## Hard budgets
 
-Defaults per worker: eight minutes, two idle minutes, eight model requests, 80k uncached input tokens, 8k output tokens, and one prompt. The substantial tier requires one-line justification and allows 15 minutes, 12 requests, 140k uncached input, and 16k output.
+Defaults per worker: five minutes, 90 idle seconds, five model requests, 50k uncached input tokens, 5k output tokens, and one prompt. The substantial tier requires one-line justification and allows 10 minutes, eight requests, 90k uncached input, and 10k output. Headroom's shared backstop is $5 per day, 60k TPM, 10 RPM, three concurrent connections, one upstream attempt, and a three-minute request timeout unless explicitly overridden.
 
 Headroom request logs attribute uncached and gross input separately: uncached input is the cost ceiling; replayed cached context is reported, not miscounted as new work. A blocked receipt ends the attempt without fallback, correction, infrastructure repair, or replay.
 

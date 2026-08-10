@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.request
 from dataclasses import dataclass
 
 
-HERDR_TIMEOUT_SECONDS = 30
+HERDR_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -20,22 +21,29 @@ class HeadroomRequest:
     output_tokens: int
 
 
-def herdr(session: str, *args: str) -> subprocess.CompletedProcess[str]:
+def herdr(
+    session: str,
+    *args: str,
+    timeout_seconds: int = HERDR_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
     command = ["herdr", "--session", session, *args]
+    env = os.environ.copy()
+    env["IPSE_HERDR_DISPATCH"] = "1"
     try:
         return subprocess.run(
             command,
             check=False,
             capture_output=True,
             text=True,
-            timeout=HERDR_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
+            env=env,
         )
     except subprocess.TimeoutExpired as error:
         return subprocess.CompletedProcess(
             command,
             124,
             stdout=error.stdout or "",
-            stderr=f"herdr timed out after {HERDR_TIMEOUT_SECONDS}s",
+            stderr=f"herdr timed out after {timeout_seconds}s",
         )
 
 
