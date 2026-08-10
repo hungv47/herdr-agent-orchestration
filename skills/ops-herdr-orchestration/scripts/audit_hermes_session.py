@@ -26,7 +26,7 @@ def audit(
     path: Path,
     session: str,
     max_calls_per_turn: int,
-    max_total_calls: int,
+    max_total_calls: int | None,
     max_input_tokens: int,
     max_output_tokens: int,
     max_duration_seconds: int,
@@ -35,6 +35,7 @@ def audit(
     orchestrated: bool,
 ) -> dict[str, object]:
     marker = f"[{session}]"
+    matching_lines = 0
     turns: list[int] = []
     current_calls = 0
     total_calls = 0
@@ -50,6 +51,7 @@ def audit(
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if marker not in line:
             continue
+        matching_lines += 1
         timestamp = TIMESTAMP_RE.match(line)
         if timestamp:
             timestamps.append(datetime.strptime(timestamp.group(1), "%Y-%m-%d %H:%M:%S"))
@@ -84,7 +86,7 @@ def audit(
     max_calls = max(turns, default=0)
     if max_calls > max_calls_per_turn:
         violations.append(f"max_calls_per_turn={max_calls}>{max_calls_per_turn}")
-    if total_calls > max_total_calls:
+    if max_total_calls is not None and total_calls > max_total_calls:
         violations.append(f"total_api_calls={total_calls}>{max_total_calls}")
     if input_tokens > max_input_tokens:
         violations.append(f"input_tokens={input_tokens}>{max_input_tokens}")
@@ -102,6 +104,8 @@ def audit(
         violations.append(f"raw_herdr_mutations={raw_herdr_calls}>0")
     if orchestrated and write_calls:
         violations.append(f"captain_write_calls={write_calls}>0")
+    if matching_lines == 0 or total_calls == 0:
+        violations.append("session_not_found_or_empty")
 
     return {
         "session": session,
@@ -137,7 +141,11 @@ def main() -> int:
     parser.add_argument("log", type=Path)
     parser.add_argument("--session", required=True)
     parser.add_argument("--max-calls-per-turn", type=int, default=8)
-    parser.add_argument("--max-total-calls", type=int, default=8)
+    parser.add_argument(
+        "--max-total-calls",
+        type=int,
+        help="optional whole-session ceiling; disabled by default",
+    )
     parser.add_argument("--max-input-tokens", type=int, default=400_000)
     parser.add_argument("--max-output-tokens", type=int, default=12_000)
     parser.add_argument("--max-duration-seconds", type=int, default=900)

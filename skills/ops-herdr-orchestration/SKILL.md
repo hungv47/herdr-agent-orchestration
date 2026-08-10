@@ -23,11 +23,11 @@ Binding policy: the repository root `AGENTS.md`.
 
 Before dispatch, require an existing Herdr session. Use OpenCode DeepSeek first, Cline DeepSeek only as fallback or a disjoint second free lane, and Pi GPT only with a capability reason.
 
-Every worker starts through `scripts/dispatch_worker.py`. It locks the deliverable and harness lane, creates one pane, sends one brief, supervises the worker, verifies that exact pane is gone, and returns one `accepted|blocked` receipt. The installed `herdr-guard` mechanically blocks raw mutations.
+Every worker starts through `scripts/dispatch_worker.py`. It locks the deliverable and harness lane, creates one pane, sends one brief, supervises the worker, verifies that exact pane is gone, and returns one `accepted|blocked` receipt. The installed `herdr-guard` is a cooperative accident guard, not a same-user security boundary.
 
 ## Compact bridge
 
-The brief is at most 1,200 characters and has exactly five lines:
+The complete prompt, including the Caveman suffix, is at most 1,200 characters. Keep the initial bridge below 550 characters; the dispatcher reports and enforces the exact available budget. The bridge has exactly five lines:
 
 1. `role=worker; outcome=` one finished result.
 2. `write=` exact paths; all other paths are read-only.

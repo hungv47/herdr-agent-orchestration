@@ -25,9 +25,9 @@ The policy is backed by executable limits:
 | visible worker output | 20k characters | 40k characters |
 | worker prompts | 1 | 1 |
 
-Hermes automatic memory/skill-review forks are disabled. The installer guards raw Herdr mutations. Wall, idle, repeated-error, visible-output, and one-prompt limits remain locally enforceable; provider dashboards remain the honest source for token and spend totals.
+Hermes automatic memory/skill-review forks are disabled. The installer adds a cooperative guard against accidental raw Herdr mutations; it is not a same-user security boundary. Wall, idle, repeated-error, cumulative-visible-output, and one-prompt limits remain locally enforceable; provider dashboards remain the honest source for token and spend totals.
 
-Captain and worker replies use Caveman's 615-byte activation rule. The full skill and bundled subagent suite are intentionally excluded because Caveman's own guidance says their larger prompt overhead can be net-negative on already-terse agentic work.
+Hermes' always-loaded SOUL and every worker prompt receive the concise Caveman contract. The full skill and bundled subagent suite are intentionally excluded because their larger prompt overhead can be net-negative on already-terse agentic work.
 
 A blocked receipt ends the attempt. The captain does not repair infrastructure, re-prompt, replay, or silently fall back during that run.
 
@@ -41,7 +41,7 @@ Each harness lane has a process lock. Parallel workers may use separate lanes on
 
 ## Five-line bridge
 
-Every worker receives at most 1,200 characters:
+Every complete worker prompt, including Caveman, is at most 1,200 characters. Keep the five-line bridge below 550 characters; the dispatcher enforces the exact available budget:
 
 ```text
 role=worker; outcome=<one finished result>
@@ -92,7 +92,7 @@ bash scripts/verify.sh
 bash scripts/verify.sh --installed
 ```
 
-The installer links the shared policy and skill into supported agent homes. When Hermes is installed, it sets `agent.max_turns=8`, `memory.nudge_interval=0`, `skills.creation_nudge_interval=0`, and `code_execution.max_tool_calls=12`.
+The installer links the shared policy and skill into supported agent homes, injects the concise contract into Hermes' always-loaded SOUL, and removes only configuration created by the retired local proxy. When Hermes is installed, it enables native 2/3/2 loop hard-stops, disables CLI delegation, and sets `agent.max_turns=8`, `memory.nudge_interval=0`, `skills.creation_nudge_interval=0`, and `code_execution.max_tool_calls=12`.
 
 ## Audits
 

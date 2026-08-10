@@ -70,6 +70,8 @@ class DispatchWorkerTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "exactly five"):
             self.dispatch.parse_brief(valid + "\nplan=first narrate everything")
+        with self.assertRaisesRegex(ValueError, "no blank lines"):
+            self.dispatch.parse_brief(valid.replace("write=", "\nwrite="))
         with self.assertRaisesRegex(ValueError, "1,200"):
             self.dispatch.parse_brief(valid.replace("one result", "x" * 1200))
 
@@ -95,8 +97,21 @@ class DispatchWorkerTests(unittest.TestCase):
 
     def test_visible_output_limit_is_deterministic(self) -> None:
         reached = self.watcher.output_limit_reached
-        self.assertFalse(reached("x" * 19_999, 20_000))
-        self.assertTrue(reached("x" * 20_000, 20_000))
+        self.assertFalse(reached(19_999, 20_000))
+        self.assertTrue(reached(20_000, 20_000))
+
+    def test_visible_output_is_counted_across_rolling_windows(self) -> None:
+        delta = self.watcher.visible_output_delta
+        first = "a\nb\nc\n"
+        second = "b\nc\nd\n"
+        third = "c\nd\ne\n"
+        total = delta("", first)
+        self.assertEqual(delta(first, second), len("d\n"))
+        total += delta(first, second) or 0
+        total += delta(second, third) or 0
+        self.assertEqual(total, len(first) + len("d\n") + len("e\n"))
+        self.assertIsNone(delta(first, "unrelated\nwindow\n"))
+        self.assertEqual(delta(first, ""), 0)
 
     def test_status_reads_real_nested_herdr_payload(self) -> None:
         payload = {"result": {"agent": {"agent_status": "working"}, "type": "agent_info"}}
@@ -117,6 +132,21 @@ class DispatchWorkerTests(unittest.TestCase):
         prompt = self.dispatch.caveman_worker_prompt(brief)
         self.assertEqual(len(prompt.splitlines()), 5)
         self.assertIn(self.dispatch.CAVEMAN_SENTINEL, prompt.splitlines()[-1])
+        self.assertLessEqual(len(prompt), self.dispatch.PROMPT_LIMIT)
+
+    def test_worker_prompt_limit_includes_caveman_suffix(self) -> None:
+        brief = "\n".join(
+            (
+                f"role=worker; outcome={'x' * 650}",
+                "write=src/result.py",
+                "non-goals=no delegation",
+                "accept=python3 -m unittest",
+                "return=accepted|blocked: paths=<paths>; checks=<checks>; blocker=<blocker>; then stop",
+            )
+        )
+        self.dispatch.parse_brief(brief)
+        with self.assertRaisesRegex(ValueError, "worker prompt exceeds 1,200"):
+            self.dispatch.caveman_worker_prompt(brief)
 
     def test_route_lock_rejects_parallel_same_harness(self) -> None:
         with self.dispatch.route_lock("opencode"):
@@ -164,17 +194,25 @@ class DispatchWorkerTests(unittest.TestCase):
     def test_route_config_is_verified_per_selected_client(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
+            policy = "\n".join(self.dispatch.POLICY_SENTINELS)
             opencode = home / ".config/opencode/AGENTS.md"
             opencode.parent.mkdir(parents=True)
-            opencode.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
+            opencode.write_text(policy, encoding="utf-8")
+            cline = home / ".agents/AGENTS.md"
+            cline.parent.mkdir(parents=True)
+            cline.write_text(policy, encoding="utf-8")
             pi = home / ".pi/agent/AGENTS.md"
             pi.parent.mkdir(parents=True)
-            pi.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
+            pi.write_text(policy, encoding="utf-8")
             with mock.patch.object(self.dispatch.Path, "home", return_value=home):
                 self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
+                self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
                 self.dispatch.verify_route_config(self.dispatch.build_route("pi"))
+                cline.write_text(self.dispatch.CAVEMAN_SENTINEL, encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "policy is unavailable or stale"):
+                    self.dispatch.verify_route_config(self.dispatch.build_route("cline"))
                 opencode.write_text("{}", encoding="utf-8")
-                with self.assertRaisesRegex(RuntimeError, "Caveman policy is unavailable"):
+                with self.assertRaisesRegex(RuntimeError, "policy is unavailable or stale"):
                     self.dispatch.verify_route_config(self.dispatch.build_route("opencode"))
 
     def test_cleanup_requires_exact_pane_to_be_gone(self) -> None:
@@ -210,6 +248,12 @@ class DispatchWorkerTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(allowed.returncode, 0)
+            workspace = subprocess.run(
+                [str(guard), "workspace", "list"],
+                check=False,
+                env=env,
+            )
+            self.assertEqual(workspace.returncode, 0)
             authorized = subprocess.run(
                 [str(guard), "--session", "ipse", "agent", "start", "w"],
                 check=False,
@@ -259,6 +303,41 @@ class DispatchWorkerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("max_calls_per_turn=9>8", result.stdout)
         self.assertIn("captain_write_calls=1>0", result.stdout)
+
+    def test_hermes_session_audit_allows_multiple_bounded_turns(self) -> None:
+        audit = SCRIPT.with_name("audit_hermes_session.py")
+        session = "session-2"
+        lines = []
+        for _turn in range(2):
+            lines.append(f"INFO [{session}] agent.turn_context: conversation turn:")
+            lines.extend(
+                f"INFO [{session}] agent.conversation_loop: API call #{index}: model=x in=100 out=10"
+                for index in range(1, 5)
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "agent.log"
+            log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(audit), str(log), "--session", session],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_hermes_session_audit_rejects_missing_session(self) -> None:
+        audit = SCRIPT.with_name("audit_hermes_session.py")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "agent.log"
+            log.write_text("other session\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(audit), str(log), "--session", "missing"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("session_not_found_or_empty", result.stdout)
 
 
 if __name__ == "__main__":
