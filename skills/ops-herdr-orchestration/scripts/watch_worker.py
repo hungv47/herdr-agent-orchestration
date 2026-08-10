@@ -37,9 +37,28 @@ def screen_output(session: str, agent: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def output_limit_reached(output: str, max_output_chars: int) -> bool:
-    """Bound visible worker chatter without claiming provider-token precision."""
-    return len(output) >= max_output_chars
+def visible_output_delta(previous: str, current: str) -> int | None:
+    """Return newly visible characters, or None when the rolling window lost continuity."""
+    if not current:
+        return 0
+    if not previous:
+        return len(current)
+    if current == previous:
+        return 0
+    if current.startswith(previous):
+        return len(current) - len(previous)
+
+    previous_lines = previous.splitlines(keepends=True)
+    current_lines = current.splitlines(keepends=True)
+    for overlap in range(min(len(previous_lines), len(current_lines)), 0, -1):
+        if previous_lines[-overlap:] == current_lines[:overlap]:
+            return sum(len(line) for line in current_lines[overlap:])
+    return None
+
+
+def output_limit_reached(visible_output_chars: int, max_output_chars: int) -> bool:
+    """Bound cumulative visible chatter without claiming provider-token precision."""
+    return visible_output_chars >= max_output_chars
 
 
 FAILURE_RE = re.compile(r"\b(error|failed|failure|exception|traceback|timed? out|not found|denied|unauthorized)\b", re.I)
@@ -82,6 +101,8 @@ def main() -> int:
     last_digest = ""
     last_change = started
     unknown_statuses = 0
+    previous_output = ""
+    visible_output_chars = 0
     while True:
         current = status(args.session, args.agent)
         elapsed = int(time.monotonic() - started)
@@ -90,6 +111,11 @@ def main() -> int:
             return 1
         unknown_statuses = unknown_statuses + 1 if current == "unknown" else 0
         output = screen_output(args.session, args.agent)
+        delta = visible_output_delta(previous_output, output)
+        if output:
+            previous_output = output
+        if delta is not None:
+            visible_output_chars += delta
         digest = hashlib.sha256(output.encode()).hexdigest() if output else ""
         now = time.monotonic()
         if digest and digest != last_digest:
@@ -99,7 +125,9 @@ def main() -> int:
             reason = "wall_limit"
         elif idle_limit_reached(last_change, now, args.idle_seconds):
             reason = "idle_limit"
-        elif output_limit_reached(output, args.max_output_chars):
+        elif delta is None:
+            reason = "output_continuity_lost"
+        elif output_limit_reached(visible_output_chars, args.max_output_chars):
             reason = "output_limit"
         elif repeated_failure_signature(output):
             reason = "repeated_failure"
@@ -114,7 +142,14 @@ def main() -> int:
             return 0
         if reason:
             interrupted = interrupt(args.session, args.agent)
-            payload = {"agent": args.agent, "status": current, "elapsed_seconds": elapsed, "interrupted": True, "reason": reason}
+            payload = {
+                "agent": args.agent,
+                "status": current,
+                "elapsed_seconds": elapsed,
+                "visible_output_chars": visible_output_chars,
+                "interrupted": True,
+                "reason": reason,
+            }
             payload["interrupt_confirmed"] = interrupted
             if not interrupted:
                 payload["reason"] = f"{reason}+interrupt_failed"

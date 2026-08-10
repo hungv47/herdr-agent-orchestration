@@ -27,13 +27,19 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo_root=$(cd -- "$script_dir/.." && pwd -P)
 source_file="$repo_root/AGENTS.md"
 source_skill="$repo_root/skills/ops-herdr-orchestration"
+hermes_policy="$repo_root/HERMES-POLICY.md"
+legacy_migrator="$repo_root/scripts/migrate-legacy-proxy.py"
 guard_source="$repo_root/scripts/herdr-guard"
 guard_front="$HOME/.local/bin/herdr"
 guard_real="$HOME/.local/libexec/herdr-real"
 guard_available=true
 guard_external=$(command -v herdr 2>/dev/null || true)
+managed_begin='<!-- BEGIN IPSE BOUNDED ORCHESTRATION -->'
+managed_end='<!-- END IPSE BOUNDED ORCHESTRATION -->'
 [[ -f "$source_file" ]] || { printf 'Missing source policy: %s\n' "$source_file" >&2; exit 1; }
 [[ -f "$source_skill/SKILL.md" ]] || { printf 'Missing source skill: %s\n' "$source_skill" >&2; exit 1; }
+[[ -f "$hermes_policy" ]] || { printf 'Missing Hermes policy: %s\n' "$hermes_policy" >&2; exit 1; }
+[[ -f "$legacy_migrator" ]] || { printf 'Missing legacy migration: %s\n' "$legacy_migrator" >&2; exit 1; }
 [[ -x "$guard_source" ]] || { printf 'Missing executable Herdr guard: %s\n' "$guard_source" >&2; exit 1; }
 
 policy_targets=(
@@ -59,6 +65,17 @@ if [[ -d "$HOME/.hermes/profiles" ]]; then
   done
 fi
 
+soul_targets=()
+if [[ -d "$HOME/.hermes" ]] || command -v hermes >/dev/null 2>&1; then
+  soul_targets+=("$HOME/.hermes/SOUL.md")
+  if [[ -d "$HOME/.hermes/profiles" ]]; then
+    for profile in "$HOME/.hermes/profiles"/*; do
+      [[ -d "$profile" ]] || continue
+      soul_targets+=("$profile/SOUL.md")
+    done
+  fi
+fi
+
 preflight_target() {
   local source=$1 target=$2
   if [[ -L "$target" ]]; then
@@ -74,6 +91,21 @@ preflight_target() {
   fi
 }
 
+preflight_managed_block() {
+  local target=$1 begin_count end_count
+  [[ ! -e "$target" || -f "$target" ]] || {
+    printf 'Refusing non-file Hermes SOUL: %s\n' "$target" >&2
+    exit 1
+  }
+  [[ -f "$target" ]] || return 0
+  begin_count=$(awk -v marker="$managed_begin" '$0 == marker { count++ } END { print count + 0 }' "$target")
+  end_count=$(awk -v marker="$managed_end" '$0 == marker { count++ } END { print count + 0 }' "$target")
+  [[ "$begin_count" -eq "$end_count" && "$begin_count" -le 1 ]] || {
+    printf 'Malformed managed orchestration block: %s\n' "$target" >&2
+    exit 1
+  }
+}
+
 # Preflight every policy and skill target before creating anything.
 for target in "${policy_targets[@]}"; do
   preflight_target "$source_file" "$target"
@@ -81,12 +113,21 @@ done
 for target in "${skill_targets[@]}"; do
   preflight_target "$source_skill" "$target"
 done
+for target in "${soul_targets[@]}"; do
+  preflight_managed_block "$target"
+done
 if [[ -L "$guard_front" && $(readlink "$guard_front") != "$guard_source" ]]; then
   printf 'Refusing unrelated Herdr symlink: %s\n' "$guard_front" >&2
   exit 1
 fi
 if [[ ! -e "$guard_front" && ! -e "$guard_real" && -z "$guard_external" ]]; then
   guard_available=false
+fi
+
+if "$apply"; then
+  python3 "$legacy_migrator"
+else
+  python3 "$legacy_migrator" --check || true
 fi
 
 install_target() {
@@ -111,6 +152,32 @@ for target in "${policy_targets[@]}"; do
 done
 for target in "${skill_targets[@]}"; do
   install_target "$source_skill" "$target" skill
+done
+
+install_managed_block() {
+  local target=$1 tmp
+  if ! "$apply"; then
+    printf 'would install always-loaded Hermes policy: %s\n' "$target"
+    return
+  fi
+  mkdir -p "$(dirname -- "$target")"
+  tmp=$(mktemp "${TMPDIR:-/tmp}/hermes-soul.XXXXXX")
+  if [[ -f "$target" ]]; then
+    awk -v begin="$managed_begin" -v end="$managed_end" '
+      $0 == begin { skip=1; next }
+      $0 == end { skip=0; next }
+      !skip { print }
+    ' "$target" >"$tmp"
+  fi
+  printf '\n%s\n' "$managed_begin" >>"$tmp"
+  cat "$hermes_policy" >>"$tmp"
+  printf '%s\n' "$managed_end" >>"$tmp"
+  mv "$tmp" "$target"
+  printf 'installed always-loaded Hermes policy: %s\n' "$target"
+}
+
+for target in "${soul_targets[@]}"; do
+  install_managed_block "$target"
 done
 
 install_herdr_guard() {
@@ -151,8 +218,14 @@ configure_hermes_home() {
   HERMES_HOME="$hermes_home" hermes config set --force agent.max_turns 8 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force memory.nudge_interval 0 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force skills.creation_nudge_interval 0 >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.warnings_enabled true >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.hard_stop_enabled true >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.hard_stop_after.exact_failure 2 >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.hard_stop_after.same_tool_failure 3 >/dev/null
+  HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.hard_stop_after.idempotent_no_progress 2 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force tool_loop_guardrails.loop_caps.max_subagents 1 >/dev/null
   HERMES_HOME="$hermes_home" hermes config set --force code_execution.max_tool_calls 12 >/dev/null
+  HERMES_HOME="$hermes_home" hermes tools disable delegation --platform cli >/dev/null
   printf 'configured Hermes ceilings: %s\n' "$hermes_home"
 }
 

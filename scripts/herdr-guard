@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Accident guard: mutating Herdr control is reserved for the bounded dispatcher.
+# Cooperative accident guard. It prevents casual raw mutations but is not a
+# security boundary against another process running as the same user.
 
 set -euo pipefail
 
@@ -54,6 +55,9 @@ case "$command" in
   session)
     [[ "$subcommand" == list ]] && allowed=1
     ;;
+  workspace)
+    [[ "$subcommand" == list ]] && allowed=1
+    ;;
   integration)
     [[ "$subcommand" == status ]] && allowed=1
     ;;
@@ -63,7 +67,6 @@ if (( allowed == 1 )); then
   exec "$real" "${args[@]}"
 fi
 
-printf 'Blocked raw Herdr mutation. Use dispatch_worker.py.\n' >&2
+printf 'Blocked raw Herdr mutation by cooperative guard. Use dispatch_worker.py.\n' >&2
 printf 'Manual recovery binary: %s\n' "$real" >&2
 exit 64
-

@@ -21,13 +21,13 @@ Worker order is binding:
 2. **DeepSeek V4 Flash** — `xhigh`, Cline with `--compaction agentic --retries 1 --timeout 300`.
 3. **GPT-5.6 Luna Max** — `Max`, Pi CLI.
 
-Use OpenCode first; Cline only as fallback/disjoint free lane; Pi only for explicit GPT work. Stronger GPT needs one-line justification. Never run two lanes on one deliverable. Never use another model or harness.
+Use OpenCode first; Cline only as fallback/disjoint free lane; Pi only for justified GPT work. Never run two lanes on one deliverable. Never use another model or harness.
 
-Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`: one locked pane/prompt, enforced budgets, verified teardown, one receipt. The installed Herdr guard blocks raw mutations.
+Dispatch only with `skills/ops-herdr-orchestration/scripts/dispatch_worker.py`: one locked pane/prompt/receipt with verified teardown. The cooperative Herdr guard prevents accidents, not same-user bypass.
 
 Delegate a whole, independently verifiable deliverable. Default to one worker. Parallel dispatch only for independent work with satisfied dependencies, disjoint write/semantic surfaces, separate resources, and cheaper integration than serial work.
 
-Every worker brief is at most 1,200 characters and contains exactly:
+Complete worker prompt (bridge + Caveman) is at most 1,200 characters. Aim below 550; dispatcher enforces exact budget:
 
 1. `role=worker; outcome=` finished result.
 2. `write=` exact paths; everything else read-only.

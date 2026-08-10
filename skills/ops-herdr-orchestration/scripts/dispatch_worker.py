@@ -21,13 +21,18 @@ from typing import Iterator, NamedTuple
 from worker_runtime import herdr as run
 
 
-BRIEF_LIMIT = 1_200
+PROMPT_LIMIT = 1_200
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RECEIPT_RE = re.compile(r"(?im)^\s*(accepted|blocked)\s*:\s*(.+)$")
 PANE_ID_RE = re.compile(r"^(?:%\d+|[A-Za-z0-9][A-Za-z0-9_.:%-]{0,127})$")
 CAVEMAN_SENTINEL = "Respond terse like smart caveman"
 CAVEMAN_RULE_PATH = Path(__file__).resolve().parents[1] / "references" / "caveman-activate.md"
+POLICY_SENTINELS = (
+    CAVEMAN_SENTINEL,
+    "A blocked receipt ends the attempt",
+    "dispatch_worker.py",
+)
 DEFAULT_BUDGET = {
     "max_seconds": 300,
     "idle_seconds": 90,
@@ -46,11 +51,11 @@ class Route(NamedTuple):
 
 
 def parse_brief(brief: str) -> dict[str, str]:
-    if len(brief) > BRIEF_LIMIT:
-        raise ValueError("brief exceeds the 1,200 character limit")
-    lines = [line.strip() for line in brief.splitlines() if line.strip()]
-    if len(lines) != 5:
-        raise ValueError("brief must contain exactly five non-empty lines")
+    if len(brief) > PROMPT_LIMIT:
+        raise ValueError("bridge alone exceeds the 1,200 character worker-prompt limit")
+    lines = [line.strip() for line in brief.splitlines()]
+    if len(lines) != 5 or any(not line for line in lines):
+        raise ValueError("brief must contain exactly five non-empty lines with no blank lines")
     if not lines[0].startswith("role=worker; outcome="):
         raise ValueError("line 1 must start with 'role=worker; outcome='")
     parsed = {"outcome": lines[0].split("outcome=", 1)[1].strip()}
@@ -140,9 +145,16 @@ def caveman_worker_prompt(brief: str) -> str:
     rule = " ".join(CAVEMAN_RULE_PATH.read_text(encoding="utf-8").split())
     if CAVEMAN_SENTINEL not in rule:
         raise RuntimeError(f"Caveman rule is invalid: {CAVEMAN_RULE_PATH}")
-    lines = brief.splitlines()
+    lines = [line.strip() for line in brief.splitlines()]
     lines[-1] = f"{lines[-1]}; caveman={rule}"
-    return "\n".join(lines)
+    prompt = "\n".join(lines)
+    if len(prompt) > PROMPT_LIMIT:
+        suffix_chars = len(f"; caveman={rule}")
+        raise ValueError(
+            f"worker prompt exceeds {PROMPT_LIMIT:,} characters; "
+            f"bridge must be at most {PROMPT_LIMIT - suffix_chars:,} characters"
+        )
+    return prompt
 
 
 def normalize_reason(label: str, value: str | None) -> str | None:
@@ -269,14 +281,16 @@ def verify_route_config(route: Route) -> None:
     home = Path.home()
     policy_paths = {
         "opencode": home / ".config/opencode/AGENTS.md",
+        "cline": home / ".agents/AGENTS.md",
         "pi": home / ".pi/agent/AGENTS.md",
     }
     path = policy_paths.get(route.name)
     if path is None:
         return
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    if CAVEMAN_SENTINEL not in text:
-        raise RuntimeError(f"{route.name} Caveman policy is unavailable: {path}")
+    missing = [sentinel for sentinel in POLICY_SENTINELS if sentinel not in text]
+    if missing:
+        raise RuntimeError(f"{route.name} policy is unavailable or stale: {path}")
 
 
 def health_gate(route: Route | None = None) -> None:
@@ -353,6 +367,7 @@ def main() -> int:
             raise ValueError("cwd must be a directory")
         brief = args.brief_file.read_text(encoding="utf-8").strip()
         fields = parse_brief(brief)
+        worker_prompt = caveman_worker_prompt(brief)
         route_reason = normalize_reason("route reason", args.route_reason)
         gpt_reason = normalize_reason("gpt reason", args.gpt_reason)
         substantial_reason = normalize_reason("substantial reason", args.substantial_reason)
@@ -407,7 +422,7 @@ def main() -> int:
             require_ok(start_worker(args.session, args.name, route, pane_id), "worker start")
             started = True
             require_ok(
-                run(args.session, "agent", "prompt", args.name, caveman_worker_prompt(brief)),
+                run(args.session, "agent", "prompt", args.name, worker_prompt),
                 "initial prompt",
             )
 
