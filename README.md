@@ -37,7 +37,7 @@ Aim below 800 characters. Brief length never blocks a launch or removes safety a
 
 ## Headroom
 
-Headroom is the data plane; Herdr is the control plane. Start supported clients through their live `headroom wrap` command and run `headroom doctor --json` once per session. Keep memory, learning, code graph, and extra MCP integrations off by default.
+Headroom is the data plane; Herdr is the control plane. Start supported clients through their exact live `headroom wrap` command; the wrapper starts the proxy. Do not add a standalone doctor check to every session. Use `headroom doctor` only after a wrapper fails before useful work or during an evaluation, then fall back direct once without replaying work.
 
 The installed CLI is the compatibility authority:
 
@@ -45,7 +45,7 @@ The installed CLI is the compatibility authority:
 headroom wrap --help
 ```
 
-Codex, Grok, OpenCode, Cline, and OMP/Pi-compatible routes currently expose wrappers or setup commands. If the requested client is absent—such as a Hermes or Buzz build without a native wrapper—run it directly under Herdr. Do not invent persistent proxy configuration or replay work after a routing failure.
+Codex, Grok, OpenCode, and Cline currently expose wrappers or setup commands. Headroom exposes an `omp` route for Oh My Pi, but that is not the installed `pi` command. Hermes, Buzz, and `pi` therefore run direct unless the live wrapper list later names them exactly. A Herdr worker is routed only when its configured launch command actually uses Headroom.
 
 Use [the five-case evaluation](evals/README.md) before making a new route persistent. Adoption requires identical acceptance, measured input savings, bounded latency/output regression, no prompt retries, no persistent config damage, and a working direct bypass.
 

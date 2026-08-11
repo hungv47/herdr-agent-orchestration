@@ -10,7 +10,7 @@ A direct user session is the captain. A child session, Herdr-started coding agen
 - Use Herdr for long work, multiple independent deliverables, specialist CLI/model needs, or independent execution that clearly repays coordination.
 - Default to one worker. Parallelize only deliverables with satisfied dependencies and disjoint files, contracts, and runtime resources.
 - Keep one deliverable on one lane. Workers never delegate.
-- Use cheap or free capable models first. Use a paid or stronger model only when the task or failed acceptance evidence justifies it.
+- Prefer DeepSeek or another capable free model through OpenCode or Cline. Use GPT through Pi or Codex only when stronger reasoning or failed acceptance evidence justifies it.
 
 ## Captain loop
 
@@ -35,10 +35,11 @@ A direct user session is the captain. A child session, Herdr-started coding agen
 
 Headroom is the token-efficiency data plane; Herdr is the control plane. Keep those responsibilities separate.
 
-- Start supported captain or worker CLIs through the matching `headroom wrap` command. Discover the live supported list with `headroom wrap --help`; do not assume an unsupported client is routed.
-- Run one `headroom doctor --json` preflight per session. If routing fails, use the direct client once and continue; do not repair Headroom during product work or replay completed work.
-- Keep Headroom memory, learning, code graph, and extra MCP integrations off unless the task explicitly needs and measures them.
-- Judge savings from Headroom/provider receipts and completed acceptance checks, not estimates alone.
+- Start a supported CLI with its exact `headroom wrap` command; the wrapper starts the proxy. Discover the live list with `headroom wrap --help`. Never claim an unsupported client is routed or retrofit a running session.
+- Do not run `headroom doctor` as a routine preflight. Use it only to diagnose a wrapper that failed before useful work or during a measured evaluation. Fall back to the direct client once; never repair routing mid-task or replay completed work.
+- Keep optional memory, learning, code graph, and Serena integrations off. Keep Headroom's own retrieval path when compressed markers require it.
+- Hermes, Buzz, and the installed `pi` command run direct unless the live wrapper list names that exact client. A Herdr worker is routed only when its configured launch command actually uses Headroom.
+- Make a route persistent only after the five-case public evaluation preserves acceptance, reduces measured input tokens, and avoids prompt retries or material latency/output regression.
 
 ## Worker contract
 

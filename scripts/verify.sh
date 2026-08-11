@@ -32,7 +32,9 @@ python3 -m unittest discover -s tests -v
 for phrase in \
   'global coding-agent contract' 'official `herdr` skill' 'Default to one worker' \
   'never block launch' 'at most one correction' 'Wait on Herdr lifecycle state' \
-  'Headroom is the token-efficiency data plane' 'headroom doctor --json'; do
+  'Headroom is the token-efficiency data plane' \
+  'Do not run `headroom doctor` as a routine preflight' \
+  'installed `pi` command run direct'; do
   need AGENTS.md "$phrase"
 done
 
