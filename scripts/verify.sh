@@ -11,9 +11,17 @@ need() { grep -Fq "$2" "$1" || fail "$1 missing: $2"; }
 required=(
   README.md AGENTS.md ATTRIBUTION.md LICENSE
   evals/README.md evals/example-input.json evals/score_trial.py
-  tests/test_score_trial.py scripts/verify.sh .github/workflows/verify.yml
+  tests/test_score_trial.py scripts/verify.sh
 )
 for file in "${required[@]}"; do [[ -f "$file" ]] || fail "missing $file"; done
+
+git_root=$(git rev-parse --show-toplevel)
+if [[ "$git_root" == "$repo_root" ]]; then
+  [[ -f .github/workflows/verify.yml ]] || fail 'missing .github/workflows/verify.yml'
+else
+  [[ -f "$git_root/.github/workflows/herdr-agent-orchestration.yml" ]] ||
+    fail 'missing monorepo Herdr workflow'
+fi
 
 retired=(
   HERMES-POLICY.md scripts/install.sh scripts/herdr-guard scripts/migrate-legacy-proxy.py
