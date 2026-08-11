@@ -28,17 +28,18 @@ bash -n scripts/verify.sh
 python3 -m py_compile evals/score_trial.py tests/test_score_trial.py
 python3 -m unittest discover -s tests -v
 
-[[ $(wc -c <AGENTS.md) -lt 3000 ]] || fail 'AGENTS.md exceeds 3 KB'
+[[ $(wc -c <AGENTS.md) -lt 4800 ]] || fail 'AGENTS.md exceeds 4.8 KB'
 for phrase in \
-  'Decide internally' 'official Herdr skill' 'One worker is the default' \
-  'at most 700 characters' 'One concrete repair prompt' \
-  'Headroom is an optional data-plane optimization' 'Omit orchestration ceremony'; do
+  'global coding-agent contract' 'official `herdr` skill' 'Default to one worker' \
+  'never block launch' 'at most one correction' 'Wait on Herdr lifecycle state' \
+  'Headroom is the token-efficiency data plane' 'headroom doctor --json'; do
   need AGENTS.md "$phrase"
 done
 
-if grep -Fq 'Choose: DIY or orchestrate' AGENTS.md; then
-  fail 'mode-choice ceremony returned'
-fi
+for retired in 'Choose: DIY or orchestrate' Caveman dispatch_worker.py \
+  'at most 700 characters' 'Headroom is experimental and off the execution path'; do
+  ! grep -Fqi "$retired" AGENTS.md || fail "retired policy returned: $retired"
+done
 
 privacy_pattern='/Us''ers/|/ho''me/[^[:space:]/]+|[[:alnum:]._%+-]+'"'@'"'[[:alnum:].-]+\.[[:alpha:]]{2,}'
 if grep -REin "$privacy_pattern" --include='*.md' --include='*.py' --include='*.sh' --include='*.json' .; then
