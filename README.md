@@ -1,3 +1,7 @@
+# Just use Firstmate bro
+https://github.com/kunchenguid/firstmate
+
+# Ignore this (this was a nice experiment btw)
 ![One captain, any worker](assets/cover.png)
 
 # Herdr-first captain
